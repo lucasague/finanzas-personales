@@ -1,11 +1,12 @@
 import * as C from './calc.js';
 
-const BUILD = '4fb472b256';
+const BUILD = 'b527190039';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
 let datos = cargar();
 let mes = C.claveMes(C.hoyISO());
+let año = añoDeHoy(); // primer mes del año que se ve en el Historial
 let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
@@ -39,6 +40,10 @@ function guardar() {
 }
 
 // ---------- Utilidades ----------
+
+function añoDeHoy() {
+  return C.inicioDelAño(C.claveMes(C.hoyISO()), datos.inicioAño);
+}
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dinero = (c) => C.formatoMoneda(c, datos.moneda);
@@ -90,8 +95,14 @@ function confirmar({ titulo, texto, si = 'Sí', peligro = true }) {
 // ---------- Pintar ----------
 
 function pintar() {
-  $('#nombre-mes').textContent = C.nombreMes(mes);
-  $('#selector-mes').style.visibility = vista === 'ajustes' || vista === 'historial' ? 'hidden' : 'visible';
+  // En el Historial, el selector de la cabecera pasa de meses a años.
+  const porAño = vista === 'historial';
+  $('#nombre-mes').textContent = porAño ? C.nombreAño(año) : C.nombreMes(mes);
+  $('#nombre-mes').setAttribute('aria-label', porAño ? 'Volver al año actual' : 'Volver al mes actual');
+  $('[data-accion="mes-anterior"]').setAttribute('aria-label', porAño ? 'Año anterior' : 'Mes anterior');
+  $('[data-accion="mes-siguiente"]').setAttribute('aria-label', porAño ? 'Año siguiente' : 'Mes siguiente');
+  $('#selector-mes').style.visibility = vista === 'ajustes' ? 'hidden' : 'visible';
+  $('#selector-mes').classList.toggle('anual', porAño);
   $('.fab').hidden = vista === 'ajustes';
   for (const v of ['resumen', 'movimientos', 'historial', 'ajustes']) {
     $(`#vista-${v}`).hidden = v !== vista;
@@ -130,29 +141,7 @@ function pintarResumen() {
   } else {
     html += `<div class="tarjeta"><h2>¿En qué se va?</h2>`;
     if (!filas.length) html += `<p class="subtitulo">Este mes solo hay ingresos.</p>`;
-    for (const f of filas) {
-      const pct = Math.min(100, Math.round(f.fraccion * 100));
-      let clase = '';
-      let nota = '';
-      if (f.presupuesto != null) {
-        if (f.restante < 0) { clase = 'pasado'; nota = `Te has pasado ${dinero(-f.restante)} de ${dinero(f.presupuesto)}`; }
-        else {
-          if (f.fraccion >= 0.8) clase = 'cerca';
-          nota = `Quedan ${dinero(f.restante)} de ${dinero(f.presupuesto)}`;
-        }
-      }
-      html += `
-        <div class="cat-fila">
-          <div class="cat-linea">
-            <span class="cat-nombre">${esc(f.categoria.emoji)} ${esc(f.categoria.nombre)}</span>
-            <span class="cat-importe">${esc(dinero(f.gastado))}</span>
-          </div>
-          <div class="barra-fondo" role="img" aria-label="${esc(f.presupuesto != null ? `${pct}% del presupuesto` : `${pct}% del mayor gasto`)}">
-            <div class="barra-relleno ${clase}" style="width:${pct}%"></div>
-          </div>
-          ${nota ? `<div class="cat-nota ${clase === 'pasado' ? 'pasado' : ''}">${esc(nota)}</div>` : ''}
-        </div>`;
-    }
+    html += barrasCategorias(filas);
     html += `</div>`;
   }
   const cuentas = C.netoPorCuenta(movs, mes, datos.cuentas);
@@ -171,6 +160,35 @@ function pintarResumen() {
     html += `</div>`;
   }
   $('#vista-resumen').innerHTML = html;
+}
+
+/** Barras de gasto por categoría (las de gastoPorCategoria), con la nota del presupuesto si lo hay. */
+function barrasCategorias(filas) {
+  let html = '';
+  for (const f of filas) {
+    const pct = Math.min(100, Math.round(f.fraccion * 100));
+    let clase = '';
+    let nota = '';
+    if (f.presupuesto != null) {
+      if (f.restante < 0) { clase = 'pasado'; nota = `Te has pasado ${dinero(-f.restante)} de ${dinero(f.presupuesto)}`; }
+      else {
+        if (f.fraccion >= 0.8) clase = 'cerca';
+        nota = `Quedan ${dinero(f.restante)} de ${dinero(f.presupuesto)}`;
+      }
+    }
+    html += `
+      <div class="cat-fila">
+        <div class="cat-linea">
+          <span class="cat-nombre">${esc(f.categoria.emoji)} ${esc(f.categoria.nombre)}</span>
+          <span class="cat-importe">${esc(dinero(f.gastado))}</span>
+        </div>
+        <div class="barra-fondo" role="img" aria-label="${esc(f.presupuesto != null ? `${pct}% del presupuesto` : `${pct}% del mayor gasto`)}">
+          <div class="barra-relleno ${clase}" style="width:${pct}%"></div>
+        </div>
+        ${nota ? `<div class="cat-nota ${clase === 'pasado' ? 'pasado' : ''}">${esc(nota)}</div>` : ''}
+      </div>`;
+  }
+  return html;
 }
 
 function pintarMovimientos() {
@@ -211,43 +229,69 @@ function pintarMovimientos() {
 }
 
 function pintarHistorial() {
-  const { movs, sinConvertir, tasas } = enBase();
+  const { movs, tasas } = enBase();
   const hoy = C.claveMes(C.hoyISO());
-  const meses = C.historial(movs, hoy, 12);
-  if (!meses.length) {
+  const r = C.resumenAño(movs, año);
+  // Los que no se pudieron pasar a la moneda principal, solo de este año.
+  const sinConvertir = datos.movimientos.filter((m) => C.enAño(C.claveMes(m.fecha), año)).length - r.n;
+  const desgloseMonedas = (porMoneda) => {
+    const monedas = Object.keys(porMoneda);
+    return monedas.length > 1 || (monedas.length === 1 && monedas[0] !== datos.moneda)
+      ? monedas.map((mo) => C.formatoMoneda(porMoneda[mo], mo)).join(' + ')
+      : '';
+  };
+  if (!r.n && !sinConvertir) {
     $('#vista-historial').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📈</span>
-      Cuando apuntes movimientos, aquí verás tus ingresos y gastos mes a mes.</div>`;
+      ${datos.movimientos.length
+        ? `No hay nada apuntado en ${esc(C.nombreAño(año))}.<br>Usa las flechas de arriba para ver otro año.`
+        : 'Cuando apuntes movimientos, aquí verás tus ingresos y gastos del año, mes a mes.'}</div>`;
     return;
   }
-  const maximo = Math.max(1, ...meses.map((f) => Math.max(f.ingresos, f.gastos)));
-  const pct = (v) => Math.round((v / maximo) * 100);
-  let html = `<div class="tarjeta"><h2>Mes a mes</h2>
-    <div class="leyenda"><span><i style="background:var(--ingreso)"></i>Ingresos</span><span><i style="background:var(--gasto)"></i>Gastos</span></div>`;
-  for (const f of meses) {
-    const monedas = Object.keys(f.ingresosPorMoneda);
-    const desglose = monedas.length > 1 || (monedas.length === 1 && monedas[0] !== datos.moneda)
-      ? monedas.map((mo) => C.formatoMoneda(f.ingresosPorMoneda[mo], mo)).join(' + ')
-      : '';
-    html += `
-      <div class="hist-fila">
-        <span class="hist-mes">${esc(C.nombreMes(f.clave).slice(0, 3))} ${esc(f.clave.slice(2, 4))}</span>
-        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno ing" style="width:${pct(f.ingresos)}%"></div></div><span class="cifra-p">${esc(dinero(f.ingresos))}</span></div>
-        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno gas" style="width:${pct(f.gastos)}%"></div></div><span class="cifra-p">${esc(dinero(f.gastos))}</span></div>
-        ${desglose ? `<span class="hist-desglose">Ingresos: ${esc(desglose)}</span>` : ''}
-        <span class="hist-saldo">${f.saldo >= 0 ? 'Sobró' : 'Faltó'} ${esc(dinero(Math.abs(f.saldo)))}</span>
-      </div>`;
-  }
-  html += `</div>`;
+  const desgloseAño = desgloseMonedas(r.ingresosPorMoneda);
+  let html = `
+    <div class="tarjeta saldo">
+      <div class="etiqueta">${r.saldo >= 0 ? 'Sobró' : 'Faltó'} en el año</div>
+      <div class="cifra ${r.saldo < 0 ? 'negativo' : ''}">${esc(dinero(Math.abs(r.saldo)))}</div>
+      <div class="totales">
+        <div><span class="t-etq">Ingresos</span><span class="t-val ingreso">${esc(dinero(r.ingresos))}</span></div>
+        <div><span class="t-etq">Gastos</span><span class="t-val gasto">${esc(dinero(r.gastos))}</span></div>
+      </div>
+      ${desgloseAño ? `<p class="desglose-anio">Ingresos: ${esc(desgloseAño)}</p>` : ''}
+    </div>`;
   if (sinConvertir) {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no se cuentan porque falta su tipo de cambio.</p>`;
   }
-  const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, hoy, 12);
+  // Los presupuestos son al mes: en el año, cada barra es relativa al mayor gasto.
+  const filas = C.gastoPorCategoria(movs, C.mesesDelAño(año), datos.categorias, { conPresupuesto: false });
+  if (filas.length) html += `<div class="tarjeta"><h2>¿En qué se fue en el año?</h2>${barrasCategorias(filas)}</div>`;
+
+  const maximo = Math.max(1, ...r.meses.map((f) => Math.max(f.ingresos, f.gastos)));
+  const pct = (v) => Math.round((v / maximo) * 100);
+  html += `<div class="tarjeta"><h2>Mes a mes</h2>
+    <div class="leyenda"><span><i style="background:var(--ingreso)"></i>Ingresos</span><span><i style="background:var(--gasto)"></i>Gastos</span></div>`;
+  for (const f of r.meses) {
+    const desglose = desgloseMonedas(f.ingresosPorMoneda);
+    const pieMes = f.n
+      ? `${f.saldo >= 0 ? 'Sobró' : 'Faltó'} ${dinero(Math.abs(f.saldo))}`
+      : (f.clave > hoy ? 'Todavía no ha llegado' : 'Sin movimientos');
+    html += `
+      <div class="hist-fila ${f.n ? '' : 'vacia'}">
+        <span class="hist-mes">${esc(C.nombreMes(f.clave).slice(0, 3))} ${esc(f.clave.slice(2, 4))}</span>
+        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno ing" style="width:${pct(f.ingresos)}%"></div></div><span class="cifra-p">${f.n ? esc(dinero(f.ingresos)) : ''}</span></div>
+        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno gas" style="width:${pct(f.gastos)}%"></div></div><span class="cifra-p">${f.n ? esc(dinero(f.gastos)) : ''}</span></div>
+        ${desglose ? `<span class="hist-desglose">Ingresos: ${esc(desglose)}</span>` : ''}
+        <span class="hist-saldo">${esc(pieMes)}</span>
+      </div>`;
+  }
+  html += `</div>`;
+  const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, C.moverMes(año, 11), 12);
   if (tipos.length) {
     html += `<div class="tarjeta"><h2>Tipo de cambio de cada mes</h2>
       <p class="explica">Sale de lo que de verdad te cobraron en tus movimientos en otra moneda.</p>`;
     for (const t of tipos) {
       html += `<h3 class="grupo-titulo">${esc(C.MONEDAS[t.moneda].nombre)}</h3><table class="tabla-tc"><tbody>`;
-      for (const f of t.meses) html += `<tr><td>${esc(C.nombreMes(f.clave))}</td><td>${esc(C.textoTipoDeCambio(t.moneda, datos.moneda, f.valor))}</td></tr>`;
+      // En el orden del año, como las barras.
+      for (const f of [...t.meses].reverse()) html += `<tr><td>${esc(C.nombreMes(f.clave))}</td><td>${esc(C.textoTipoDeCambio(t.moneda, datos.moneda, f.valor))}</td></tr>`;
       html += `</tbody></table>`;
     }
     html += `</div>`;
@@ -258,6 +302,9 @@ function pintarHistorial() {
 function pintarAjustes() {
   const opciones = Object.entries(C.MONEDAS)
     .map(([cod, m]) => `<option value="${cod}" ${cod === datos.moneda ? 'selected' : ''}>${esc(m.nombre)} (${cod})</option>`)
+    .join('');
+  const opcionesMes = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((n) => `<option value="${n}" ${n === datos.inicioAño ? 'selected' : ''}>${esc(C.nombreMes(`2000-${String(n).padStart(2, '0')}`).slice(0, -5))}</option>`)
     .join('');
   const grupo = (tipo) => datos.categorias.filter((c) => c.tipo === tipo).map((c) => `
     <button type="button" class="cat-edit" data-accion="editar-cat" data-id="${esc(c.id)}">
@@ -279,6 +326,14 @@ function pintarAjustes() {
       <div class="ajuste">
         <label for="moneda">Ver totales en</label>
         <select id="moneda">${opciones}</select>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <h2>Año</h2>
+      <p class="explica">El historial suma los meses por años que empiezan en este mes (con septiembre, de septiembre a agosto).</p>
+      <div class="ajuste">
+        <label for="inicio-anio">El año empieza en</label>
+        <select id="inicio-anio">${opcionesMes}</select>
       </div>
     </div>
     <div class="tarjeta">
@@ -315,6 +370,13 @@ function pintarAjustes() {
     datos.moneda = e.target.value;
     guardar();
     aviso(`Totales en ${nombreCorto[datos.moneda] || datos.moneda}`);
+    pintar();
+  });
+  $('#inicio-anio').addEventListener('change', (e) => {
+    datos.inicioAño = Number(e.target.value);
+    guardar();
+    año = añoDeHoy();
+    aviso(`Ahora el año va de ${C.nombreAño(año)}`);
     pintar();
   });
 }
@@ -435,6 +497,7 @@ function guardarMovimiento() {
   if (!guardar()) return;
   $('#dlg-mov').close();
   mes = C.claveMes(fecha);
+  año = C.inicioDelAño(mes, datos.inicioAño);
   aviso(editandoMov ? 'Cambios guardados' : `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} apuntado`);
   pintar();
 }
@@ -609,6 +672,7 @@ async function importar(archivo) {
   });
   if (!ok) return;
   datos = r.datos;
+  año = añoDeHoy();
   guardar();
   aviso(r.descartados ? `Copia recuperada (${r.descartados} movimientos no se pudieron leer)` : 'Copia recuperada');
   pintar();
@@ -621,9 +685,9 @@ async function borrarTodo() {
     si: 'Borrar todo',
   });
   if (!ok) return;
-  const moneda = datos.moneda;
+  const { moneda, inicioAño } = datos;
   datos = C.datosIniciales();
-  datos.moneda = moneda;
+  Object.assign(datos, { moneda, inicioAño });
   guardar();
   aviso('Todo borrado');
   pintar();
@@ -659,9 +723,10 @@ document.addEventListener('click', (e) => {
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
     case 'cerrar': el.closest('dialog').close(); break;
-    case 'mes-anterior': mes = C.moverMes(mes, -1); pintar(); break;
-    case 'mes-siguiente': mes = C.moverMes(mes, 1); pintar(); break;
-    case 'mes-hoy': mes = C.claveMes(C.hoyISO()); pintar(); break;
+    // En el Historial las flechas mueven de año en año.
+    case 'mes-anterior': if (vista === 'historial') año = C.moverMes(año, -12); else mes = C.moverMes(mes, -1); pintar(); break;
+    case 'mes-siguiente': if (vista === 'historial') año = C.moverMes(año, 12); else mes = C.moverMes(mes, 1); pintar(); break;
+    case 'mes-hoy': if (vista === 'historial') año = añoDeHoy(); else mes = C.claveMes(C.hoyISO()); pintar(); break;
     case 'exportar': exportar(); break;
     case 'importar': $('#archivo-importar').value = ''; $('#archivo-importar').click(); break;
     case 'borrar-todo': borrarTodo(); break;

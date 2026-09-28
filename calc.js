@@ -35,12 +35,14 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 3;
+export const VERSION_DATOS = 4;
+export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
   return {
     version: VERSION_DATOS,
     moneda: 'MXN',
+    inicioAño: INICIO_AÑO_POR_DEFECTO,
     categorias: CATEGORIAS_POR_DEFECTO.map((c) => ({ ...c, presupuesto: null })),
     cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
@@ -149,6 +151,35 @@ export function nombreMes(clave) {
   return `${MESES[m - 1]} ${a}`;
 }
 
+// ---------- Años que no empiezan en enero ----------
+// Un "año" se identifica por la clave de su primer mes: con inicio 9, "2026-09" es septiembre 2026 – agosto 2027.
+
+/** Primer mes del año (que empieza en el mes `inicio`, 1-12) al que pertenece el mes `clave`. */
+export function inicioDelAño(clave, inicio = INICIO_AÑO_POR_DEFECTO) {
+  const [a, m] = clave.split('-').map(Number);
+  const año = m >= inicio ? a : a - 1;
+  return `${año}-${String(inicio).padStart(2, '0')}`;
+}
+
+/** Las 12 claves de mes del año que empieza en `desde`, en orden. */
+export function mesesDelAño(desde) {
+  return Array.from({ length: 12 }, (_, i) => moverMes(desde, i));
+}
+
+/** "Sep 2026 – Ago 2027"; si el año empieza en enero, "Ene – Dic 2026". */
+export function nombreAño(desde) {
+  const hasta = moverMes(desde, 11);
+  const corto = (c) => MESES[Number(c.slice(5, 7)) - 1].slice(0, 3);
+  if (desde.slice(0, 4) === hasta.slice(0, 4)) return `${corto(desde)} – ${corto(hasta)} ${desde.slice(0, 4)}`;
+  return `${corto(desde)} ${desde.slice(0, 4)} – ${corto(hasta)} ${hasta.slice(0, 4)}`;
+}
+
+/** true si el mes `clave` cae en el año que empieza en `desde`. */
+export function enAño(clave, desde) {
+  const d = distanciaMeses(clave, desde);
+  return d >= 0 && d < 12;
+}
+
 /** Movimientos del mes, más recientes primero. */
 export function movimientosDelMes(movimientos, clave) {
   return movimientos
@@ -171,8 +202,11 @@ export function resumenMes(movimientos, clave) {
  * Gasto del mes por categoría, de mayor a menor. Incluye las categorías con presupuesto aunque no
  * tengan gasto (para ver cuánto queda). Los gastos de categorías borradas van a "Sin categoría".
  * fraccion: gastado/presupuesto si hay presupuesto; si no, gastado/mayor gasto (para dibujar la barra).
+ * `clave` puede ser un mes o una lista de meses (un año); con conPresupuesto: false no se miran los
+ * presupuestos, que son al mes.
  */
-export function gastoPorCategoria(movimientos, clave, categorias) {
+export function gastoPorCategoria(movimientos, clave, categorias, { conPresupuesto = true } = {}) {
+  const claves = new Set(Array.isArray(clave) ? clave : [clave]);
   const porId = new Map();
   for (const c of categorias) {
     if (c.tipo !== 'gasto') continue;
@@ -180,17 +214,18 @@ export function gastoPorCategoria(movimientos, clave, categorias) {
   }
   const huerfana = { categoria: { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null }, gastado: 0 };
   for (const m of movimientos) {
-    if (m.tipo !== 'gasto' || claveMes(m.fecha) !== clave) continue;
+    if (m.tipo !== 'gasto' || !claves.has(claveMes(m.fecha))) continue;
     const fila = porId.get(m.categoria) || huerfana;
     fila.gastado += m.importe;
   }
   const filas = [...porId.values()];
   if (huerfana.gastado > 0) filas.push(huerfana);
-  const visibles = filas.filter((f) => f.gastado > 0 || f.categoria.presupuesto > 0);
+  const conPres = (f) => conPresupuesto && f.categoria.presupuesto > 0;
+  const visibles = filas.filter((f) => f.gastado > 0 || conPres(f));
   const maximo = Math.max(1, ...visibles.map((f) => f.gastado));
   return visibles
     .map((f) => {
-      const p = f.categoria.presupuesto > 0 ? f.categoria.presupuesto : null;
+      const p = conPres(f) ? f.categoria.presupuesto : null;
       return {
         categoria: f.categoria,
         gastado: f.gastado,
@@ -229,6 +264,9 @@ export function validarCopia(obj) {
       return { ok: false, error: 'Al archivo le faltan los movimientos o las categorías.' };
     }
     const moneda = MONEDAS[obj.moneda] ? obj.moneda : 'MXN';
+    // Hasta la versión 3 no se elegía en qué mes empieza el año: septiembre.
+    const inicioAño = Number.isInteger(obj.inicioAño) && obj.inicioAño >= 1 && obj.inicioAño <= 12
+      ? obj.inicioAño : INICIO_AÑO_POR_DEFECTO;
     const categorias = [];
     const ids = new Set();
     for (const c of obj.categorias) {
@@ -286,7 +324,7 @@ export function validarCopia(obj) {
     }
     return {
       ok: true,
-      datos: { version: VERSION_DATOS, moneda, categorias, cuentas, movimientos },
+      datos: { version: VERSION_DATOS, moneda, inicioAño, categorias, cuentas, movimientos },
       descartados,
     };
   } catch (e) {
@@ -384,16 +422,23 @@ export function historial(movs, hasta, n = 12) {
   if (!movs.length) return [];
   const primero = movs.reduce((min, m) => (m.fecha < min ? m.fecha : min), movs[0].fecha);
   const desde = claveMes(primero);
-  const meses = [];
+  const claves = [];
   for (let i = 0; i < n; i++) {
     const clave = moverMes(hasta, -i);
     if (distanciaMeses(clave, desde) < 0) break;
-    meses.push({ clave, ingresos: 0, gastos: 0, saldo: 0, ingresosPorMoneda: {} });
+    claves.push(clave);
   }
+  return totalesPorMes(movs, claves);
+}
+
+/** Ingresos, gastos, saldo, ingresos por moneda original y nº de movimientos de cada mes de `claves`. */
+function totalesPorMes(movs, claves) {
+  const meses = claves.map((clave) => ({ clave, ingresos: 0, gastos: 0, saldo: 0, ingresosPorMoneda: {}, n: 0 }));
   const porClave = new Map(meses.map((f) => [f.clave, f]));
   for (const m of movs) {
     const f = porClave.get(claveMes(m.fecha));
     if (!f) continue;
+    f.n++;
     if (m.tipo === 'ingreso') {
       f.ingresos += m.importe;
       const mo = m.monedaOriginal || 'MXN';
@@ -402,6 +447,23 @@ export function historial(movs, hasta, n = 12) {
   }
   for (const f of meses) f.saldo = f.ingresos - f.gastos;
   return meses;
+}
+
+/**
+ * Los 12 meses del año que empieza en `desde` (en orden, los que no tienen movimientos a cero) y los totales
+ * del año. Recibe movimientos ya pasados por enMonedaBase.
+ */
+export function resumenAño(movs, desde) {
+  const meses = totalesPorMes(movs, mesesDelAño(desde));
+  const total = { ingresos: 0, gastos: 0, saldo: 0, ingresosPorMoneda: {}, n: 0 };
+  for (const f of meses) {
+    total.ingresos += f.ingresos;
+    total.gastos += f.gastos;
+    total.n += f.n;
+    for (const [mo, v] of Object.entries(f.ingresosPorMoneda)) total.ingresosPorMoneda[mo] = (total.ingresosPorMoneda[mo] || 0) + v;
+  }
+  total.saldo = total.ingresos - total.gastos;
+  return { meses, ...total };
 }
 
 /**

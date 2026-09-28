@@ -75,6 +75,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   font-size: 1.5rem; line-height: 1; color: var(--texto-suave);
 }
 .icono:active, .selector-mes .mes:active { background: var(--superficie-2); }
+/* En el Historial el selector lleva un año ("Sep 2026 – Ago 2027"): más compacto para que quepa en una línea. */
+.selector-mes.anual .mes { min-width: 0; white-space: nowrap; font-size: .9rem; padding: 0 2px; }
+.selector-mes.anual .icono { min-width: 36px; }
 
 main { max-width: 640px; margin: 0 auto; padding: 4px 16px 88px; }
 .vista[hidden] { display: none; }
@@ -252,6 +255,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .barra-relleno.gas { background: var(--gasto); }
 .hist-desglose { grid-column: 2; font-size: .78rem; color: var(--texto-suave); }
 .hist-saldo { grid-column: 2; font-size: .78rem; color: var(--texto-suave); }
+.hist-fila.vacia .hist-mes { color: var(--texto-suave); font-weight: 550; }
+.desglose-anio { font-size: .82rem; color: var(--texto-suave); margin: 10px 0 0; }
 .tabla-tc { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
 .tabla-tc td { padding: 6px 0; border-bottom: 1px solid var(--borde); }
 .tabla-tc td:last-child { text-align: right; }
