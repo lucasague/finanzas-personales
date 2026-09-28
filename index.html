@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mis cuentas</title>
+  <meta name="description" content="Apunta tus gastos e ingresos y mira cómo va el mes. Tus datos se quedan en tu móvil.">
+  <meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mis cuentas">
+  <meta name="version" content="ae924d581b">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="aviso-version" class="aviso" hidden>
+    <span>Hay una versión nueva.</span>
+    <button type="button" data-accion="actualizar" class="boton-texto">Actualizar</button>
+  </div>
+
+  <header class="cabecera">
+    <h1 class="marca">Mis cuentas</h1>
+    <div class="selector-mes" id="selector-mes">
+      <button type="button" class="icono" data-accion="mes-anterior" aria-label="Mes anterior">‹</button>
+      <button type="button" class="mes" data-accion="mes-hoy" id="nombre-mes" aria-label="Volver al mes actual"></button>
+      <button type="button" class="icono" data-accion="mes-siguiente" aria-label="Mes siguiente">›</button>
+    </div>
+  </header>
+
+  <main id="contenido">
+    <section id="vista-resumen" class="vista" aria-label="Resumen del mes"></section>
+    <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
+    <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
+    <p class="pie">Borrador v0.1 — tus datos se quedan en este móvil</p>
+  </main>
+
+  <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
+
+  <nav class="barra" aria-label="Secciones">
+    <button type="button" data-vista="resumen" aria-current="page"><span aria-hidden="true">◔</span>Resumen</button>
+    <button type="button" data-vista="movimientos"><span aria-hidden="true">≡</span>Movimientos</button>
+    <button type="button" data-vista="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
+  </nav>
+
+  <!-- Apuntar / editar movimiento -->
+  <dialog id="dlg-mov" class="hoja" aria-labelledby="dlg-mov-titulo">
+    <form method="dialog" id="form-mov" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-mov-titulo">Nuevo movimiento</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="segmentado" role="radiogroup" aria-label="Tipo">
+        <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
+        <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
+      </div>
+      <label class="campo-importe">
+        <span class="simbolo" id="mov-simbolo">$</span>
+        <input id="mov-importe" name="importe" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Importe">
+      </label>
+      <p class="error" id="mov-error" hidden></p>
+      <div class="chips" id="mov-categorias" role="radiogroup" aria-label="Categoría"></div>
+      <label class="campo">
+        <span>Nota</span>
+        <input id="mov-nota" name="nota" maxlength="200" autocomplete="off" placeholder="Opcional">
+      </label>
+      <label class="campo">
+        <span>Fecha</span>
+        <input id="mov-fecha" name="fecha" type="date" required>
+      </label>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-mov" id="mov-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Editar categoría -->
+  <dialog id="dlg-cat" class="hoja" aria-labelledby="dlg-cat-titulo">
+    <form method="dialog" id="form-cat" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-cat-titulo">Categoría</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="fila-campos">
+        <label class="campo emoji">
+          <span>Icono</span>
+          <input id="cat-emoji" maxlength="8" autocomplete="off">
+        </label>
+        <label class="campo">
+          <span>Nombre</span>
+          <input id="cat-nombre" maxlength="40" autocomplete="off" required>
+        </label>
+      </div>
+      <div class="segmentado" role="radiogroup" aria-label="Tipo de categoría">
+        <label><input type="radio" name="cat-tipo" value="gasto" checked><span>De gasto</span></label>
+        <label><input type="radio" name="cat-tipo" value="ingreso"><span>De ingreso</span></label>
+      </div>
+      <label class="campo" id="cat-presupuesto-campo">
+        <span>Presupuesto al mes (opcional)</span>
+        <input id="cat-presupuesto" inputmode="decimal" autocomplete="off" placeholder="Sin presupuesto">
+      </label>
+      <p class="error" id="cat-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-cat" id="cat-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirmación (sustituye a confirm()) -->
+  <dialog id="dlg-confirmar" class="modal" aria-labelledby="conf-titulo">
+    <h2 id="conf-titulo"></h2>
+    <p id="conf-texto"></p>
+    <div class="acciones">
+      <button type="button" class="boton" data-respuesta="no">Cancelar</button>
+      <button type="button" class="boton peligro" data-respuesta="si" id="conf-si">Sí</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <input type="file" id="archivo-importar" accept="application/json,.json" hidden>
+</body>
+</html>
