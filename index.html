@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="b61a6edfb7">
+  <meta name="version" content="4fb472b256">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -36,7 +36,7 @@
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial mes a mes" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.2 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.3 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -73,6 +73,10 @@
       </div>
       <p class="error" id="mov-error" hidden></p>
       <div class="chips" id="mov-categorias" role="radiogroup" aria-label="Categoría"></div>
+      <div id="mov-cuenta-bloque">
+        <p class="etiqueta-moneda">Cuenta</p>
+        <div class="chips" id="mov-cuentas" role="radiogroup" aria-label="Cuenta"></div>
+      </div>
       <label class="campo">
         <span>Nota</span>
         <input id="mov-nota" name="nota" maxlength="200" autocomplete="off" placeholder="Opcional">
@@ -116,6 +120,30 @@
       <p class="error" id="cat-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cat" id="cat-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Editar cuenta -->
+  <dialog id="dlg-cuenta" class="hoja" aria-labelledby="dlg-cuenta-titulo">
+    <form method="dialog" id="form-cuenta" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-cuenta-titulo">Cuenta</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <label class="campo">
+        <span>Nombre</span>
+        <input id="cuenta-nombre" maxlength="40" autocomplete="off" required>
+      </label>
+      <div class="segmentado tres" role="radiogroup" aria-label="Tipo de cuenta">
+        <label><input type="radio" name="cuenta-tipo" value="efectivo" checked><span>💵 Efectivo</span></label>
+        <label><input type="radio" name="cuenta-tipo" value="debito"><span>💳 Débito</span></label>
+        <label><input type="radio" name="cuenta-tipo" value="credito"><span>🏦 Crédito</span></label>
+      </div>
+      <p class="error" id="cuenta-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-cuenta" id="cuenta-borrar" hidden>Borrar</button>
         <button type="submit" class="boton principal">Guardar</button>
       </div>
     </form>

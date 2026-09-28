@@ -20,16 +20,29 @@ export const CATEGORIAS_POR_DEFECTO = [
   { id: 'otros-ingresos', emoji: '➕', nombre: 'Otros ingresos', tipo: 'ingreso' },
 ];
 
+export const TIPOS_CUENTA = {
+  efectivo: { emoji: '💵', nombre: 'Efectivo' },
+  debito: { emoji: '💳', nombre: 'Débito' },
+  credito: { emoji: '🏦', nombre: 'Crédito' },
+};
+
+export const CUENTAS_POR_DEFECTO = [
+  { id: 'efectivo', nombre: 'Efectivo', tipo: 'efectivo' },
+  { id: 'debito', nombre: 'Débito', tipo: 'debito' },
+  { id: 'credito', nombre: 'Tarjeta de crédito', tipo: 'credito' },
+];
+
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 2;
+export const VERSION_DATOS = 3;
 
 export function datosIniciales() {
   return {
     version: VERSION_DATOS,
     moneda: 'MXN',
     categorias: CATEGORIAS_POR_DEFECTO.map((c) => ({ ...c, presupuesto: null })),
+    cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
   };
 }
@@ -189,6 +202,25 @@ export function gastoPorCategoria(movimientos, clave, categorias) {
     .sort((a, b) => b.gastado - a.gastado || (b.presupuesto || 0) - (a.presupuesto || 0));
 }
 
+/**
+ * Lo que se movió en cada cuenta en el mes (ingresos − gastos), solo las cuentas con movimientos.
+ * Recibe movimientos ya pasados por enMonedaBase. Los de cuentas borradas o sin cuenta van a "Sin cuenta".
+ */
+export function netoPorCuenta(movs, clave, cuentas) {
+  const porId = new Map(cuentas.map((c) => [c.id, { cuenta: c, ingresos: 0, gastos: 0, n: 0 }]));
+  const huerfana = { cuenta: { id: null, nombre: 'Sin cuenta', tipo: null }, ingresos: 0, gastos: 0, n: 0 };
+  for (const m of movs) {
+    if (claveMes(m.fecha) !== clave) continue;
+    const fila = porId.get(m.cuenta) || huerfana;
+    if (m.tipo === 'ingreso') fila.ingresos += m.importe;
+    else fila.gastos += m.importe;
+    fila.n++;
+  }
+  return [...porId.values(), huerfana]
+    .filter((f) => f.n > 0)
+    .map((f) => ({ cuenta: f.cuenta, ingresos: f.ingresos, gastos: f.gastos, neto: f.ingresos - f.gastos }));
+}
+
 /** Comprueba una copia importada (o lo guardado) y la normaliza. Nunca lanza. */
 export function validarCopia(obj) {
   try {
@@ -211,6 +243,22 @@ export function validarCopia(obj) {
         presupuesto: c.tipo === 'ingreso' ? null : pres,
       });
     }
+    // Hasta la versión 2 no había cuentas: se ponen las de partida.
+    let cuentas = [];
+    if (Array.isArray(obj.cuentas)) {
+      const idsC = new Set();
+      for (const c of obj.cuentas) {
+        if (!c || typeof c.id !== 'string' || !c.id || idsC.has(c.id)) continue;
+        idsC.add(c.id);
+        cuentas.push({
+          id: c.id,
+          nombre: typeof c.nombre === 'string' && c.nombre.trim() ? c.nombre.trim().slice(0, 40) : 'Sin nombre',
+          tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'efectivo',
+        });
+      }
+    } else {
+      cuentas = CUENTAS_POR_DEFECTO.map((c) => ({ ...c }));
+    }
     const movimientos = [];
     let descartados = 0;
     for (const m of obj.movimientos) {
@@ -230,6 +278,7 @@ export function validarCopia(obj) {
         importeBase,
         monedaBase: importeBase ? m.monedaBase : null,
         categoria: typeof m.categoria === 'string' ? m.categoria : null,
+        cuenta: typeof m.cuenta === 'string' && m.cuenta ? m.cuenta : null,
         nota: typeof m.nota === 'string' ? m.nota.slice(0, 200) : '',
         fecha: m.fecha,
         creado: Number.isFinite(m.creado) ? m.creado : 0,
@@ -237,7 +286,7 @@ export function validarCopia(obj) {
     }
     return {
       ok: true,
-      datos: { version: VERSION_DATOS, moneda, categorias, movimientos },
+      datos: { version: VERSION_DATOS, moneda, categorias, cuentas, movimientos },
       descartados,
     };
   } catch (e) {

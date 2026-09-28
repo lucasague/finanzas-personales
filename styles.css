@@ -235,6 +235,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .campo-importe:focus-within { border-color: var(--acento); }
 .etiqueta-moneda { font-size: .82rem; color: var(--texto-suave); margin: 0 0 4px; }
 .segmentado.monedas { grid-template-columns: repeat(4, 1fr); }
+.segmentado.tres { grid-template-columns: repeat(3, 1fr); }
+.cuenta-neto { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .bloque-base { background: var(--superficie-2); border-radius: 12px; padding: 10px 12px 2px; margin-bottom: 14px; }
 .bloque-base .campo input { background: var(--superficie); }
 .nota-tasa { font-size: .82rem; color: var(--texto-suave); margin: -4px 0 8px; }

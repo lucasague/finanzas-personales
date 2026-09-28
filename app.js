@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'b61a6edfb7';
+const BUILD = '4fb472b256';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -9,8 +9,10 @@ let mes = C.claveMes(C.hoyISO());
 let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
+let editandoCuenta = null; // id de la cuenta en edición, o null si es nueva
 let ultimaCategoria = { gasto: null, ingreso: null };
 let ultimaMoneda = null;
+let ultimaCuenta = null;
 let baseTocada = false; // si la persona ha escrito a mano lo que le costó en la moneda principal
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
@@ -45,6 +47,8 @@ const nombreCorto = { MXN: 'pesos', CRC: 'colones', USD: 'dólares', EUR: 'euros
 const enBase = () => C.enMonedaBase(datos.movimientos, datos.moneda);
 const categoria = (id) => datos.categorias.find((c) => c.id === id)
   || { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null };
+const cuenta = (id) => datos.cuentas.find((c) => c.id === id) || { id: null, nombre: 'Sin cuenta', tipo: null };
+const emojiCuenta = (c) => (C.TIPOS_CUENTA[c.tipo] || { emoji: '❔' }).emoji;
 
 let temporizadorAviso;
 function aviso(texto) {
@@ -151,6 +155,21 @@ function pintarResumen() {
     }
     html += `</div>`;
   }
+  const cuentas = C.netoPorCuenta(movs, mes, datos.cuentas);
+  if (cuentas.length) {
+    html += `<div class="tarjeta"><h2>Por cuenta</h2>
+      <p class="explica">Lo que se movió este mes en cada una (ingresos − gastos).</p>`;
+    for (const f of cuentas) {
+      html += `
+        <div class="cat-fila">
+          <div class="cat-linea">
+            <span class="cat-nombre">${esc(emojiCuenta(f.cuenta))} ${esc(f.cuenta.nombre)}</span>
+            <span class="cuenta-neto ${f.neto < 0 ? 'gasto' : 'ingreso'}">${f.neto < 0 ? '−' : '+'}${esc(dinero(Math.abs(f.neto)))}</span>
+          </div>
+        </div>`;
+    }
+    html += `</div>`;
+  }
   $('#vista-resumen').innerHTML = html;
 }
 
@@ -176,6 +195,7 @@ function pintarMovimientos() {
     const otraMoneda = moneda !== datos.moneda;
     const enPrincipal = otraMoneda ? C.valorEn(m, datos.moneda, tasas) : null;
     let detalle = m.nota ? c.nombre : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto');
+    detalle += ` · ${cuenta(m.cuenta).nombre}`;
     if (otraMoneda) detalle += enPrincipal != null ? ` · ${dinero(enPrincipal)}` : ' · sin tipo de cambio';
     html += `<li><button type="button" class="mov" data-accion="editar-mov" data-id="${esc(m.id)}">
       <span class="emoji" aria-hidden="true">${esc(c.emoji)}</span>
@@ -245,6 +265,12 @@ function pintarAjustes() {
       <span class="texto">${esc(c.nombre)}${c.presupuesto ? `<br><span class="detalle">Presupuesto: ${esc(dinero(c.presupuesto))} al mes</span>` : ''}</span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`).join('') || '<p class="subtitulo">Ninguna.</p>';
+  const listaCuentas = datos.cuentas.map((c) => `
+    <button type="button" class="cat-edit" data-accion="editar-cuenta" data-id="${esc(c.id)}">
+      <span class="emoji" aria-hidden="true">${esc(emojiCuenta(c))}</span>
+      <span class="texto">${esc(c.nombre)}<br><span class="detalle">${esc(C.TIPOS_CUENTA[c.tipo].nombre)}</span></span>
+      <span class="flecha" aria-hidden="true">›</span>
+    </button>`).join('') || '<p class="subtitulo">Ninguna.</p>';
 
   $('#vista-ajustes').innerHTML = `
     <div class="tarjeta">
@@ -263,6 +289,12 @@ function pintarAjustes() {
       <h3 class="grupo-titulo">Ingresos</h3>
       ${grupo('ingreso')}
       <button type="button" class="boton-linea" data-accion="nueva-cat">+ Añadir categoría</button>
+    </div>
+    <div class="tarjeta">
+      <h2>Cuentas</h2>
+      <p class="explica">Dónde está el dinero: efectivo, tarjeta de débito, tarjeta de crédito… Toca una para cambiarla.</p>
+      ${listaCuentas}
+      <button type="button" class="boton-linea" data-accion="nueva-cuenta">+ Añadir cuenta</button>
     </div>
     <div class="tarjeta">
       <h2>Copia de seguridad</h2>
@@ -302,6 +334,19 @@ function pintarChips(seleccion) {
     </button>`).join('');
 }
 
+function pintarCuentas(seleccion) {
+  $('#mov-cuenta-bloque').hidden = !datos.cuentas.length;
+  $('#mov-cuentas').innerHTML = datos.cuentas.map((c) => `
+    <button type="button" class="chip" role="radio" aria-checked="${c.id === seleccion}" data-cuenta="${esc(c.id)}">
+      <span aria-hidden="true">${esc(emojiCuenta(c))}</span>${esc(c.nombre)}
+    </button>`).join('');
+}
+
+function cuentaSeleccionada() {
+  const b = document.querySelector('#mov-cuentas [aria-checked="true"]');
+  return b ? b.dataset.cuenta : null;
+}
+
 function catSeleccionada() {
   const b = document.querySelector('#mov-categorias [aria-checked="true"]');
   return b ? b.dataset.cat : null;
@@ -328,6 +373,8 @@ function abrirMovimiento(id = null) {
   const porDefecto = datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
     || datos.categorias.find((c) => c.tipo === tipo);
   pintarChips(m ? m.categoria : porDefecto?.id);
+  const cuentaDef = datos.cuentas.find((c) => c.id === ultimaCuenta) || datos.cuentas[0];
+  pintarCuentas(m ? m.cuenta : cuentaDef?.id);
   actualizarBase();
   $('#dlg-mov').showModal();
   if (!m) setTimeout(() => $('#mov-importe').focus(), 50);
@@ -371,9 +418,10 @@ function guardarMovimiento() {
   }
   const tipo = tipoMov();
   const cat = catSeleccionada();
+  const cta = cuentaSeleccionada();
   const campos = {
     tipo, importe, moneda, importeBase, monedaBase: importeBase ? datos.moneda : null,
-    categoria: cat, nota: $('#mov-nota').value.trim().slice(0, 200), fecha,
+    categoria: cat, cuenta: cta, nota: $('#mov-nota').value.trim().slice(0, 200), fecha,
   };
   if (editandoMov) {
     const m = datos.movimientos.find((x) => x.id === editandoMov);
@@ -383,6 +431,7 @@ function guardarMovimiento() {
   }
   if (cat) ultimaCategoria[tipo] = cat;
   ultimaMoneda = moneda;
+  if (cta) ultimaCuenta = cta;
   if (!guardar()) return;
   $('#dlg-mov').close();
   mes = C.claveMes(fecha);
@@ -465,6 +514,58 @@ async function borrarCategoria() {
   pintar();
 }
 
+// ---------- Cuentas ----------
+
+function abrirCuenta(id = null) {
+  editandoCuenta = id;
+  const c = id ? datos.cuentas.find((x) => x.id === id) : null;
+  $('#dlg-cuenta-titulo').textContent = c ? 'Editar cuenta' : 'Nueva cuenta';
+  $('#cuenta-nombre').value = c ? c.nombre : '';
+  document.querySelector(`#form-cuenta input[name="cuenta-tipo"][value="${c ? c.tipo : 'efectivo'}"]`).checked = true;
+  $('#cuenta-borrar').hidden = !c;
+  $('#cuenta-error').hidden = true;
+  $('#dlg-cuenta').showModal();
+  if (!c) setTimeout(() => $('#cuenta-nombre').focus(), 50);
+}
+
+function guardarCuenta() {
+  const nombre = $('#cuenta-nombre').value.trim().slice(0, 40);
+  const err = $('#cuenta-error');
+  if (!nombre) { err.textContent = 'Ponle un nombre.'; err.hidden = false; return; }
+  const tipo = document.querySelector('#form-cuenta input[name="cuenta-tipo"]:checked').value;
+  if (editandoCuenta) {
+    const c = datos.cuentas.find((x) => x.id === editandoCuenta);
+    if (c) Object.assign(c, { nombre, tipo });
+  } else {
+    datos.cuentas.push({ id: C.nuevoId(), nombre, tipo });
+  }
+  if (!guardar()) return;
+  $('#dlg-cuenta').close();
+  aviso('Cuenta guardada');
+  pintar();
+}
+
+async function borrarCuenta() {
+  const id = editandoCuenta;
+  const c = datos.cuentas.find((x) => x.id === id);
+  const usos = datos.movimientos.filter((m) => m.cuenta === id).length;
+  $('#dlg-cuenta').close();
+  const ok = await confirmar({
+    titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
+    texto: usos
+      ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: quedarán «Sin cuenta».`
+      : 'No tiene movimientos.',
+    si: 'Borrar',
+  });
+  if (!ok) { abrirCuenta(id); return; }
+  datos.cuentas = datos.cuentas.filter((x) => x.id !== id);
+  for (const m of datos.movimientos) if (m.cuenta === id) m.cuenta = null;
+  if (ultimaCuenta === id) ultimaCuenta = null;
+  guardar();
+  aviso('Cuenta borrada');
+  pintar();
+}
+
 // ---------- Copia de seguridad ----------
 
 async function exportar() {
@@ -516,7 +617,7 @@ async function importar(archivo) {
 async function borrarTodo() {
   const ok = await confirmar({
     titulo: '¿Borrar todo?',
-    texto: 'Se borran todos los movimientos, categorías y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
+    texto: 'Se borran todos los movimientos, categorías, cuentas y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
     si: 'Borrar todo',
   });
   if (!ok) return;
@@ -539,6 +640,11 @@ document.addEventListener('click', (e) => {
     for (const b of document.querySelectorAll('#mov-categorias .chip')) b.setAttribute('aria-checked', String(b === chip));
     return;
   }
+  const chipCuenta = e.target.closest('#mov-cuentas .chip');
+  if (chipCuenta) {
+    for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(b === chipCuenta));
+    return;
+  }
 
   const el = e.target.closest('[data-accion]');
   if (!el) return;
@@ -549,6 +655,9 @@ document.addEventListener('click', (e) => {
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
     case 'nueva-cat': abrirCategoria(); break;
     case 'borrar-cat': borrarCategoria(); break;
+    case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
+    case 'nueva-cuenta': abrirCuenta(); break;
+    case 'borrar-cuenta': borrarCuenta(); break;
     case 'cerrar': el.closest('dialog').close(); break;
     case 'mes-anterior': mes = C.moverMes(mes, -1); pintar(); break;
     case 'mes-siguiente': mes = C.moverMes(mes, 1); pintar(); break;
@@ -563,6 +672,7 @@ document.addEventListener('click', (e) => {
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });
+$('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
     const tipo = tipoMov();
