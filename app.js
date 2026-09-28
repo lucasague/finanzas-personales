@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'b527190039';
+const BUILD = 'dabdb85d48';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -64,10 +64,13 @@ function aviso(texto) {
   temporizadorAviso = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
-function confirmar({ titulo, texto, si = 'Sí', peligro = true }) {
+function confirmar({ titulo, texto, si = 'Sí', peligro = true, lista = [], soloAceptar = false }) {
   const dlg = $('#dlg-confirmar');
   $('#conf-titulo').textContent = titulo;
   $('#conf-texto').textContent = texto;
+  $('#conf-lista').innerHTML = lista.map((l) => `<li>${esc(l)}</li>`).join('');
+  $('#conf-lista').hidden = !lista.length;
+  $('#conf-no').hidden = soloAceptar;
   const botonSi = $('#conf-si');
   botonSi.textContent = si;
   botonSi.className = 'boton ' + (peligro ? 'peligro' : 'principal');
@@ -358,6 +361,11 @@ function pintarAjustes() {
         <button type="button" class="boton" data-accion="exportar">Guardar una copia</button>
         <button type="button" class="boton" data-accion="importar">Recuperar desde una copia</button>
       </div>
+    </div>
+    <div class="tarjeta">
+      <h2>Traer datos de Wallet</h2>
+      <p class="explica">Si apuntabas en la app Wallet, exporta tus movimientos a un archivo (CSV) y elígelo aquí. Antes de traer nada te enseño un resumen. Las transferencias entre tus cuentas no se traen.</p>
+      <button type="button" class="boton" data-accion="wallet">Traer datos de Wallet</button>
     </div>
     <div class="tarjeta">
       <h2>Empezar de cero</h2>
@@ -678,6 +686,59 @@ async function importar(archivo) {
   pintar();
 }
 
+// ---------- Traer datos de Wallet ----------
+
+const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+async function traerWallet(archivo) {
+  let r;
+  try {
+    r = C.leerWallet(await archivo.text());
+  } catch (e) {
+    r = { ok: false, error: 'No he podido leer el archivo.' };
+  }
+  if (!r.ok) { aviso(r.error); return; }
+  const p = C.prepararWallet(r.filas, datos);
+  const n = p.movimientos.length;
+  const lista = [];
+  if (n) {
+    lista.push(`Del ${C.fechaDMA(p.desde)} al ${C.fechaDMA(p.hasta)}`);
+    if (p.cuentasNuevas.length) lista.push(`${plural(p.cuentasNuevas.length, 'cuenta nueva', 'cuentas nuevas')}: ${p.cuentasNuevas.map((c) => c.nombre).join(', ')}`);
+    if (p.categoriasNuevas.length) lista.push(plural(p.categoriasNuevas.length, 'categoría nueva', 'categorías nuevas'));
+  }
+  if (p.transferencias) lista.push(`${plural(p.transferencias, 'transferencia', 'transferencias')} entre tus cuentas: no se traen`);
+  if (p.duplicados) lista.push(`${plural(p.duplicados, 'movimiento ya estaba', 'movimientos ya estaban')}: no se repiten`);
+  if (p.otraMoneda) lista.push(`${plural(p.otraMoneda, 'movimiento', 'movimientos')} en una moneda que la app no tiene: no se traen`);
+  if (p.rotas) lista.push(`${plural(p.rotas, 'fila no se ha podido leer', 'filas no se han podido leer')}`);
+  if (!n) {
+    await confirmar({ titulo: 'No hay nada nuevo que traer', texto: 'Todo lo de este archivo ya está en la app o no se trae.', lista, si: 'Vale', peligro: false, soloAceptar: true });
+    return;
+  }
+  const ok = await confirmar({
+    titulo: `¿Traer ${plural(n, 'movimiento', 'movimientos')} de Wallet?`,
+    texto: 'Se añaden a lo que ya tienes; no se borra nada.',
+    lista,
+    si: 'Traer',
+    peligro: false,
+  });
+  if (!ok) return;
+  datos.cuentas.push(...p.cuentasNuevas);
+  datos.categorias.push(...p.categoriasNuevas);
+  datos.movimientos.push(...p.movimientos);
+  if (!guardar()) {
+    // No cabe o no se puede guardar: se deshace para no quedarse a medias.
+    const nuevos = new Set(p.movimientos.map((m) => m.id));
+    datos.movimientos = datos.movimientos.filter((m) => !nuevos.has(m.id));
+    datos.cuentas = datos.cuentas.filter((c) => !p.cuentasNuevas.includes(c));
+    datos.categorias = datos.categorias.filter((c) => !p.categoriasNuevas.includes(c));
+    return;
+  }
+  mes = C.claveMes(p.hasta);
+  año = C.inicioDelAño(mes, datos.inicioAño);
+  aviso(`Listo: ${plural(n, 'movimiento traído', 'movimientos traídos')} de Wallet`);
+  pintar();
+}
+
 async function borrarTodo() {
   const ok = await confirmar({
     titulo: '¿Borrar todo?',
@@ -729,6 +790,7 @@ document.addEventListener('click', (e) => {
     case 'mes-hoy': if (vista === 'historial') año = añoDeHoy(); else mes = C.claveMes(C.hoyISO()); pintar(); break;
     case 'exportar': exportar(); break;
     case 'importar': $('#archivo-importar').value = ''; $('#archivo-importar').click(); break;
+    case 'wallet': $('#archivo-wallet').value = ''; $('#archivo-wallet').click(); break;
     case 'borrar-todo': borrarTodo(); break;
     case 'actualizar': actualizarApp(); break;
     default: break;
@@ -755,6 +817,7 @@ for (const r of document.querySelectorAll('#form-cat input[name="cat-tipo"]')) {
   r.addEventListener('change', () => { $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso'; });
 }
 $('#archivo-importar').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importar(f); });
+$('#archivo-wallet').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) traerWallet(f); });
 // Tocar fuera de una hoja la cierra.
 for (const d of document.querySelectorAll('dialog.hoja')) {
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });

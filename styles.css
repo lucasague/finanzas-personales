@@ -214,9 +214,12 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .hoja-cabecera { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .hoja-cabecera h2 { font-size: 1.1rem; }
 
-.modal { width: calc(100% - 32px); max-width: 400px; border-radius: 18px; padding: 20px; }
+.modal { width: calc(100% - 32px); max-width: 400px; max-height: 90vh; overflow-y: auto; border-radius: 18px; padding: 20px; }
 .modal h2 { font-size: 1.1rem; margin-bottom: 8px; }
 .modal p { margin: 0 0 16px; color: var(--texto-suave); }
+.conf-lista { margin: -8px 0 16px; padding-left: 20px; font-size: .92rem; }
+.conf-lista li + li { margin-top: 4px; }
+.conf-lista[hidden], .modal .boton[hidden] { display: none; }
 
 .segmentado {
   display: grid; grid-template-columns: 1fr 1fr; gap: 4px;

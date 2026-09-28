@@ -320,6 +320,9 @@ export function validarCopia(obj) {
         nota: typeof m.nota === 'string' ? m.nota.slice(0, 200) : '',
         fecha: m.fecha,
         creado: Number.isFinite(m.creado) ? m.creado : 0,
+        // Los traídos de otra app (Wallet) guardan de dónde vienen, para no traerlos dos veces.
+        ...(typeof m.origen === 'string' && m.origen && typeof m.claveOrigen === 'string' && m.claveOrigen
+          ? { origen: m.origen.slice(0, 20), claveOrigen: m.claveOrigen.slice(0, 40) } : {}),
       });
     }
     return {
@@ -500,4 +503,193 @@ export function textoTipoDeCambio(moneda, base, valor) {
   const num = (v) => new Intl.NumberFormat('es-MX', { maximumFractionDigits: v >= 100 ? 1 : v >= 10 ? 2 : 4 }).format(v);
   if (valor >= 1) return `1 ${moneda} = ${num(valor)} ${base}`;
   return `1 ${base} = ${num(1 / valor)} ${moneda}`;
+}
+
+// ---------- Traer datos de Wallet (BudgetBakers) ----------
+// El export de Wallet es un CSV (separador ";" o ",") con una fila por movimiento. Las transferencias entre
+// cuentas propias no son ni gasto ni ingreso: de momento no se traen. Cada movimiento traído lleva una clave
+// sacada de la fila entera, para que traer dos veces el mismo archivo (o uno que se solapa) no duplique nada.
+
+const COLUMNAS_WALLET = ['account', 'category', 'currency', 'amount', 'type', 'date'];
+export const EMOJI_CATEGORIA_NUEVA = '🏷️';
+
+/** Texto CSV -> filas (listas de campos). Quita el BOM, detecta ";" o "," por la cabecera y entiende comillas. */
+export function parseCSV(texto) {
+  let s = String(texto ?? '');
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+  const finCabecera = s.search(/\r?\n/);
+  const cabecera = finCabecera < 0 ? s : s.slice(0, finCabecera);
+  const sep = cabecera.split(';').length >= cabecera.split(',').length ? ';' : ',';
+  const filas = [];
+  let fila = [];
+  let campo = '';
+  let comillas = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (comillas) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { campo += '"'; i++; } else comillas = false;
+      } else campo += c;
+    } else if (c === '"') comillas = true;
+    else if (c === sep) { fila.push(campo); campo = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && s[i + 1] === '\n') i++;
+      fila.push(campo); campo = '';
+      filas.push(fila); fila = [];
+    } else campo += c;
+  }
+  if (campo !== '' || fila.length) { fila.push(campo); filas.push(fila); }
+  return filas.filter((f) => f.length > 1 || f[0] !== '');
+}
+
+/** Nombre para comparar: sin mayúsculas, sin tildes y sin espacios de sobra. */
+export function nombreComparable(s) {
+  return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** Huella corta y estable de un texto (cyrb53): la misma fila da siempre la misma clave. */
+export function huella(texto) {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < texto.length; i++) {
+    const ch = texto.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * Lee un export de Wallet. Devuelve { ok, filas } con una fila por movimiento (campos por nombre de columna y
+ * `clave`), o { ok: false, error } en lenguaje llano. Nunca lanza.
+ */
+export function leerWallet(texto) {
+  const noEs = { ok: false, error: 'Este archivo no parece un export de Wallet.' };
+  try {
+    const filas = parseCSV(texto);
+    if (!filas.length) return noEs;
+    const cab = filas[0].map((c) => c.trim().toLowerCase());
+    if (!COLUMNAS_WALLET.every((c) => cab.includes(c))) return noEs;
+    const vistas = new Map(); // filas idénticas dentro del archivo: cada una es un movimiento distinto
+    const res = [];
+    for (const f of filas.slice(1)) {
+      const o = {};
+      cab.forEach((c, i) => { o[c] = (f[i] ?? '').trim(); });
+      const base = huella(f.join('\u0001'));
+      const n = (vistas.get(base) || 0) + 1;
+      vistas.set(base, n);
+      o.clave = n === 1 ? base : `${base}-${n}`;
+      res.push(o);
+    }
+    if (!res.length) return { ok: false, error: 'El archivo de Wallet no tiene movimientos.' };
+    return { ok: true, filas: res };
+  } catch (e) {
+    return noEs;
+  }
+}
+
+const TIPO_CUENTA_WALLET = { CREDIT_CARD: 'credito', CASH: 'efectivo' };
+const mayoritario = (cuenta) => [...cuenta.entries()].sort((a, b) => b[1] - a[1])[0][0];
+const sumarUno = (mapa, k) => mapa.set(k, (mapa.get(k) || 0) + 1);
+
+/**
+ * Prepara lo que se va a traer de Wallet sin tocar `datos`: movimientos nuevos, cuentas y categorías que hay que
+ * crear, y los recuentos para el resumen (transferencias, duplicados, monedas que la app no tiene, filas rotas).
+ * El importe en pesos que da Wallet (ref_currency_amount) se guarda como importeBase en MXN: es el tipo de cambio
+ * real de cada movimiento, sea cual sea la moneda principal de la app.
+ */
+export function prepararWallet(filas, datos) {
+  const yaEstan = new Set(datos.movimientos.filter((m) => m.origen === 'wallet' && m.claveOrigen).map((m) => m.claveOrigen));
+  const cuentasPorNombre = new Map(datos.cuentas.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
+  const catsPorNombre = new Map(datos.categorias.map((c) => [nombreComparable(c.nombre), c.id]));
+  const cuentasNuevas = new Map(); // nombre en minúsculas -> { cuenta, pagos: Map(tipo -> n) }
+  const catsNuevas = new Map(); // nombre comparable -> { categoria, tipos: Map(tipo -> n) }
+  const movimientos = [];
+  let transferencias = 0;
+  let duplicados = 0;
+  let otraMoneda = 0;
+  let rotas = 0;
+  for (const f of filas) {
+    if (f.transfer === 'true' || f.category === 'TRANSFER') { transferencias++; continue; }
+    const cantidad = Number(f.amount);
+    const fecha = (f.date || '').slice(0, 10);
+    if (!Number.isFinite(cantidad) || cantidad === 0 || !esFechaISO(fecha)) { rotas++; continue; }
+    const moneda = (f.currency || '').toUpperCase();
+    if (!MONEDAS[moneda]) { otraMoneda++; continue; }
+    if (yaEstan.has(f.clave)) { duplicados++; continue; }
+    yaEstan.add(f.clave);
+    const tipo = /^(ingresos?|income)$/i.test(f.type) ? 'ingreso'
+      : /^(gastos?|expenses?)$/i.test(f.type) ? 'gasto' : (cantidad > 0 ? 'ingreso' : 'gasto');
+
+    let cuenta = null;
+    if (f.account) {
+      const k = f.account.toLowerCase();
+      cuenta = cuentasPorNombre.get(k) || null;
+      if (!cuenta) {
+        let n = cuentasNuevas.get(k);
+        if (!n) {
+          n = { cuenta: { id: nuevoId(), nombre: f.account.slice(0, 40), tipo: 'debito' }, pagos: new Map() };
+          cuentasNuevas.set(k, n);
+        }
+        sumarUno(n.pagos, TIPO_CUENTA_WALLET[f.payment_type] || 'debito');
+        cuenta = n.cuenta.id;
+      }
+    }
+    let categoria = null;
+    if (f.category) {
+      const k = nombreComparable(f.category);
+      categoria = catsPorNombre.get(k) || null;
+      if (!categoria) {
+        let n = catsNuevas.get(k);
+        if (!n) {
+          n = { categoria: { id: nuevoId(), emoji: EMOJI_CATEGORIA_NUEVA, nombre: f.category.slice(0, 40), tipo, presupuesto: null }, tipos: new Map() };
+          catsNuevas.set(k, n);
+        }
+        sumarUno(n.tipos, tipo);
+        categoria = n.categoria.id;
+      }
+    }
+
+    const ref = Math.round(Math.abs(Number(f.ref_currency_amount)) * 100);
+    const importeBase = moneda !== 'MXN' && Number.isFinite(ref) && ref > 0 ? ref : null;
+    const etiquetas = (f.labels || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const nota = [f.note, ...etiquetas].filter(Boolean).join(' · ').slice(0, 200);
+    const creado = new Date((f.date || '').replace(' ', 'T')).getTime();
+    movimientos.push({
+      id: nuevoId() + movimientos.length.toString(36),
+      tipo,
+      importe: Math.round(Math.abs(cantidad) * 100),
+      moneda,
+      importeBase,
+      monedaBase: importeBase ? 'MXN' : null,
+      categoria,
+      cuenta,
+      nota,
+      fecha,
+      creado: Number.isFinite(creado) ? creado : 0,
+      origen: 'wallet',
+      claveOrigen: f.clave,
+    });
+  }
+  for (const n of cuentasNuevas.values()) n.cuenta.tipo = mayoritario(n.pagos);
+  for (const n of catsNuevas.values()) n.categoria.tipo = mayoritario(n.tipos);
+  let desde = null;
+  let hasta = null;
+  for (const m of movimientos) {
+    if (!desde || m.fecha < desde) desde = m.fecha;
+    if (!hasta || m.fecha > hasta) hasta = m.fecha;
+  }
+  return {
+    movimientos,
+    cuentasNuevas: [...cuentasNuevas.values()].map((n) => n.cuenta),
+    categoriasNuevas: [...catsNuevas.values()].map((n) => n.categoria),
+    transferencias,
+    duplicados,
+    otraMoneda,
+    rotas,
+    desde,
+    hasta,
+  };
 }

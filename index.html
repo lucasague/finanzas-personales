@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="b527190039">
+  <meta name="version" content="dabdb85d48">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -36,7 +36,7 @@
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.4 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.5 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -153,13 +153,15 @@
   <dialog id="dlg-confirmar" class="modal" aria-labelledby="conf-titulo">
     <h2 id="conf-titulo"></h2>
     <p id="conf-texto"></p>
+    <ul id="conf-lista" class="conf-lista" hidden></ul>
     <div class="acciones">
-      <button type="button" class="boton" data-respuesta="no">Cancelar</button>
+      <button type="button" class="boton" data-respuesta="no" id="conf-no">Cancelar</button>
       <button type="button" class="boton peligro" data-respuesta="si" id="conf-si">Sí</button>
     </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <input type="file" id="archivo-importar" accept="application/json,.json" hidden>
+  <input type="file" id="archivo-wallet" accept=".csv,text/csv,text/comma-separated-values,text/plain" hidden>
 </body>
 </html>
