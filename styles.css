@@ -233,10 +233,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   border-bottom: 2px solid var(--borde); margin-bottom: 12px; padding: 4px 4px;
 }
 .campo-importe:focus-within { border-color: var(--acento); }
-.selector-moneda {
-  flex: none; min-height: 44px; padding: 0 8px; border-radius: 10px; font-weight: 650;
-  border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto);
-}
+.etiqueta-moneda { font-size: .82rem; color: var(--texto-suave); margin: 0 0 4px; }
+.segmentado.monedas { grid-template-columns: repeat(4, 1fr); }
 .bloque-base { background: var(--superficie-2); border-radius: 12px; padding: 10px 12px 2px; margin-bottom: 14px; }
 .bloque-base .campo input { background: var(--superficie); }
 .nota-tasa { font-size: .82rem; color: var(--texto-suave); margin: -4px 0 8px; }

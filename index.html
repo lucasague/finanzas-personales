@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="11c0e35c0e">
+  <meta name="version" content="b61a6edfb7">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -59,8 +59,9 @@
         <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
         <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
       </div>
+      <p class="etiqueta-moneda">Moneda en que se pagó</p>
+      <div class="segmentado monedas" id="mov-moneda" role="radiogroup" aria-label="Moneda"></div>
       <div class="campo-importe">
-        <select id="mov-moneda" class="selector-moneda" aria-label="Moneda"></select>
         <input id="mov-importe" name="importe" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Importe">
       </div>
       <div id="mov-base" class="bloque-base" hidden>

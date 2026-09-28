@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '11c0e35c0e';
+const BUILD = 'b61a6edfb7';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -315,7 +315,7 @@ function abrirMovimiento(id = null) {
   $('#mov-error').hidden = true;
   const moneda = m ? (m.moneda || datos.moneda) : (ultimaMoneda || datos.moneda);
   $('#mov-moneda').innerHTML = Object.keys(C.MONEDAS)
-    .map((cod) => `<option value="${cod}" ${cod === moneda ? 'selected' : ''}>${cod}</option>`).join('');
+    .map((cod) => `<label><input type="radio" name="moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
   baseTocada = !!(m && m.importeBase && m.monedaBase === datos.moneda);
   $('#mov-importe-base').value = baseTocada ? C.importeEditable(m.importeBase) : '';
   const tipo = m ? m.tipo : 'gasto';
@@ -334,8 +334,10 @@ function abrirMovimiento(id = null) {
 }
 
 // Si el movimiento va en otra moneda, pide lo que costó en la principal y lo propone con el último tipo de cambio.
+const monedaMov = () => document.querySelector('#mov-moneda input:checked')?.value || datos.moneda;
+
 function actualizarBase() {
-  const moneda = $('#mov-moneda').value;
+  const moneda = monedaMov();
   const otra = moneda !== datos.moneda;
   $('#mov-base').hidden = !otra;
   if (!otra) return;
@@ -355,7 +357,7 @@ function actualizarBase() {
 function guardarMovimiento() {
   const importe = C.parseImporte($('#mov-importe').value);
   const fecha = $('#mov-fecha').value;
-  const moneda = $('#mov-moneda').value;
+  const moneda = monedaMov();
   const err = $('#mov-error');
   if (importe == null) { err.textContent = 'Escribe un importe mayor que cero.'; err.hidden = false; $('#mov-importe').focus(); return; }
   if (!C.esFechaISO(fecha)) { err.textContent = 'Elige una fecha.'; err.hidden = false; return; }
