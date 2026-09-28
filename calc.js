@@ -4,7 +4,7 @@
 export const MONEDAS = {
   MXN: { locale: 'es-MX', nombre: 'Peso mexicano' },
   CRC: { locale: 'es-CR', nombre: 'Colón costarricense' },
-  USD: { locale: 'es-US', nombre: 'Dólar estadounidense' },
+  USD: { locale: 'es-MX', nombre: 'Dólar estadounidense' }, // es-MX: "USD 10", que no se confunda con el peso
   EUR: { locale: 'es-ES', nombre: 'Euro' },
 };
 
@@ -23,7 +23,7 @@ export const CATEGORIAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 1;
+export const VERSION_DATOS = 2;
 
 export function datosIniciales() {
   return {
@@ -218,10 +218,17 @@ export function validarCopia(obj) {
         descartados++;
         continue;
       }
+      // Versión 1 no guardaba moneda: todo estaba en la moneda de la app.
+      const monedaMov = MONEDAS[m.moneda] ? m.moneda : moneda;
+      const importeBase = Number.isInteger(m.importeBase) && m.importeBase > 0 && MONEDAS[m.monedaBase]
+        && m.monedaBase !== monedaMov ? m.importeBase : null;
       movimientos.push({
         id: typeof m.id === 'string' && m.id ? m.id : nuevoId(),
         tipo: m.tipo === 'ingreso' ? 'ingreso' : 'gasto',
         importe: m.importe,
+        moneda: monedaMov,
+        importeBase,
+        monedaBase: importeBase ? m.monedaBase : null,
         categoria: typeof m.categoria === 'string' ? m.categoria : null,
         nota: typeof m.nota === 'string' ? m.nota.slice(0, 200) : '',
         fecha: m.fecha,
@@ -236,4 +243,150 @@ export function validarCopia(obj) {
   } catch (e) {
     return { ok: false, error: 'No he podido leer el archivo.' };
   }
+}
+
+// ---------- Varias monedas ----------
+// Cada movimiento guarda su importe en la moneda en que se pagó (moneda). Si esa no es la moneda principal,
+// guarda también lo que costó en la principal (importeBase, monedaBase): de ahí sale el tipo de cambio real
+// de ese día, que es el que se usa para los totales y para estimar los movimientos que no lo traen.
+
+/** Tipos de cambio que salen de los propios movimientos: "USD>MXN" -> Map(mes -> { de, a }) en céntimos. */
+export function tasasImplicitas(movimientos) {
+  const tasas = new Map();
+  for (const m of movimientos) {
+    if (!m.importeBase || !m.monedaBase || m.monedaBase === m.moneda) continue;
+    const clave = `${m.moneda}>${m.monedaBase}`;
+    if (!tasas.has(clave)) tasas.set(clave, new Map());
+    const porMes = tasas.get(clave);
+    const mes = claveMes(m.fecha);
+    const t = porMes.get(mes) || { de: 0, a: 0 };
+    t.de += m.importe;
+    t.a += m.importeBase;
+    porMes.set(mes, t);
+  }
+  return tasas;
+}
+
+function distanciaMeses(a, b) {
+  const [aa, am] = a.split('-').map(Number);
+  const [ba, bm] = b.split('-').map(Number);
+  return (aa * 12 + am) - (ba * 12 + bm);
+}
+
+function tasaDirecta(tasas, de, a, mes) {
+  const porMes = tasas.get(`${de}>${a}`);
+  if (!porMes || !porMes.size) return null;
+  let mejor = null;
+  let mejorDist = Infinity;
+  for (const [k, t] of porMes) {
+    const d = distanciaMeses(mes, k);
+    // El mes más cercano; a igual distancia, el anterior (lo ya ocurrido).
+    const dist = Math.abs(d) * 2 + (d < 0 ? 1 : 0);
+    if (dist < mejorDist) { mejorDist = dist; mejor = t; }
+  }
+  return mejor.a / mejor.de;
+}
+
+/** Cuántas unidades de `a` vale una de `de` en ese mes (el mes con dato más cercano). null si no se sabe. */
+export function tasa(tasas, de, a, mes) {
+  if (de === a) return 1;
+  const directa = tasaDirecta(tasas, de, a, mes);
+  if (directa != null) return directa;
+  const inversa = tasaDirecta(tasas, a, de, mes);
+  return inversa != null ? 1 / inversa : null;
+}
+
+/** Importe del movimiento en la moneda `base`, en céntimos. null si falta el tipo de cambio. */
+export function valorEn(m, base, tasas) {
+  const moneda = m.moneda || base;
+  if (moneda === base) return m.importe;
+  if (m.importeBase && m.monedaBase === base) return m.importeBase;
+  const mes = claveMes(m.fecha);
+  let t = tasa(tasas, moneda, base, mes);
+  if (t != null) return Math.round(m.importe * t);
+  if (m.importeBase && m.monedaBase) {
+    t = tasa(tasas, m.monedaBase, base, mes);
+    if (t != null) return Math.round(m.importeBase * t);
+  }
+  return null;
+}
+
+/**
+ * Pasa los movimientos a la moneda principal para sumarlos: `importe` queda en la principal y el original
+ * se conserva en `importeOriginal`/`monedaOriginal`. Los que no se pueden convertir se cuentan aparte.
+ */
+export function enMonedaBase(movimientos, base) {
+  const tasas = tasasImplicitas(movimientos);
+  const movs = [];
+  let sinConvertir = 0;
+  for (const m of movimientos) {
+    const v = valorEn(m, base, tasas);
+    if (v == null) { sinConvertir++; continue; }
+    movs.push({ ...m, importe: v, importeOriginal: m.importe, monedaOriginal: m.moneda || base });
+  }
+  return { movs, sinConvertir, tasas };
+}
+
+/**
+ * Ingresos, gastos y saldo de cada mes, del más reciente (hasta) hacia atrás, como mucho `n` meses y sin
+ * pasar del primer mes con movimientos. Recibe movimientos ya pasados por enMonedaBase.
+ */
+export function historial(movs, hasta, n = 12) {
+  if (!movs.length) return [];
+  const primero = movs.reduce((min, m) => (m.fecha < min ? m.fecha : min), movs[0].fecha);
+  const desde = claveMes(primero);
+  const meses = [];
+  for (let i = 0; i < n; i++) {
+    const clave = moverMes(hasta, -i);
+    if (distanciaMeses(clave, desde) < 0) break;
+    meses.push({ clave, ingresos: 0, gastos: 0, saldo: 0, ingresosPorMoneda: {} });
+  }
+  const porClave = new Map(meses.map((f) => [f.clave, f]));
+  for (const m of movs) {
+    const f = porClave.get(claveMes(m.fecha));
+    if (!f) continue;
+    if (m.tipo === 'ingreso') {
+      f.ingresos += m.importe;
+      const mo = m.monedaOriginal || 'MXN';
+      f.ingresosPorMoneda[mo] = (f.ingresosPorMoneda[mo] || 0) + (m.importeOriginal ?? m.importe);
+    } else f.gastos += m.importe;
+  }
+  for (const f of meses) f.saldo = f.ingresos - f.gastos;
+  return meses;
+}
+
+/**
+ * Tipo de cambio de cada moneda extranjera frente a la principal, por mes, solo en los meses con movimientos
+ * que lo traen. Devuelve [{ moneda, meses: [{ clave, valor }] }] con valor = unidades de principal por 1.
+ */
+export function tiposDeCambioPorMes(tasas, base, hasta, n = 12) {
+  const res = new Map();
+  for (const [clave, porMes] of tasas) {
+    const [de, a] = clave.split('>');
+    if (de !== base && a !== base) continue;
+    const otra = de === base ? a : de;
+    if (!res.has(otra)) res.set(otra, new Map());
+    const filas = res.get(otra);
+    for (const [mes, t] of porMes) {
+      const d = distanciaMeses(hasta, mes);
+      if (d < 0 || d >= n) continue;
+      const f = filas.get(mes) || { de: 0, a: 0 };
+      // Todo expresado como "otra -> base".
+      if (de === otra) { f.de += t.de; f.a += t.a; } else { f.de += t.a; f.a += t.de; }
+      filas.set(mes, f);
+    }
+  }
+  return [...res.entries()]
+    .map(([moneda, filas]) => ({
+      moneda,
+      meses: [...filas.entries()].sort((x, y) => y[0].localeCompare(x[0])).map(([clave, f]) => ({ clave, valor: f.a / f.de })),
+    }))
+    .filter((x) => x.meses.length);
+}
+
+/** "1 USD = 18.2 MXN" o, si la moneda vale menos que la principal, "1 MXN = 27.8 CRC". */
+export function textoTipoDeCambio(moneda, base, valor) {
+  const num = (v) => new Intl.NumberFormat('es-MX', { maximumFractionDigits: v >= 100 ? 1 : v >= 10 ? 2 : 4 }).format(v);
+  if (valor >= 1) return `1 ${moneda} = ${num(valor)} ${base}`;
+  return `1 ${base} = ${num(1 / valor)} ${moneda}`;
 }

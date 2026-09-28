@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'ae924d581b';
+const BUILD = '11c0e35c0e';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -10,6 +10,8 @@ let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
 let ultimaCategoria = { gasto: null, ingreso: null };
+let ultimaMoneda = null;
+let baseTocada = false; // si la persona ha escrito a mano lo que le costó en la moneda principal
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
 
@@ -38,6 +40,9 @@ function guardar() {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dinero = (c) => C.formatoMoneda(c, datos.moneda);
+const nombreCorto = { MXN: 'pesos', CRC: 'colones', USD: 'dólares', EUR: 'euros' };
+// Movimientos pasados a la moneda principal (para sumar), con el original guardado aparte.
+const enBase = () => C.enMonedaBase(datos.movimientos, datos.moneda);
 const categoria = (id) => datos.categorias.find((c) => c.id === id)
   || { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null };
 
@@ -82,9 +87,9 @@ function confirmar({ titulo, texto, si = 'Sí', peligro = true }) {
 
 function pintar() {
   $('#nombre-mes').textContent = C.nombreMes(mes);
-  $('#selector-mes').style.visibility = vista === 'ajustes' ? 'hidden' : 'visible';
+  $('#selector-mes').style.visibility = vista === 'ajustes' || vista === 'historial' ? 'hidden' : 'visible';
   $('.fab').hidden = vista === 'ajustes';
-  for (const v of ['resumen', 'movimientos', 'ajustes']) {
+  for (const v of ['resumen', 'movimientos', 'historial', 'ajustes']) {
     $(`#vista-${v}`).hidden = v !== vista;
     const boton = document.querySelector(`.barra [data-vista="${v}"]`);
     if (v === vista) boton.setAttribute('aria-current', 'page');
@@ -92,12 +97,14 @@ function pintar() {
   }
   if (vista === 'resumen') pintarResumen();
   if (vista === 'movimientos') pintarMovimientos();
+  if (vista === 'historial') pintarHistorial();
   if (vista === 'ajustes') pintarAjustes();
 }
 
 function pintarResumen() {
-  const r = C.resumenMes(datos.movimientos, mes);
-  const filas = C.gastoPorCategoria(datos.movimientos, mes, datos.categorias);
+  const { movs, sinConvertir } = enBase();
+  const r = C.resumenMes(movs, mes);
+  const filas = C.gastoPorCategoria(movs, mes, datos.categorias);
   const hayMovs = datos.movimientos.some((m) => C.claveMes(m.fecha) === mes);
 
   let html = `
@@ -109,6 +116,9 @@ function pintarResumen() {
         <div><span class="t-etq">Gastos</span><span class="t-val gasto">${esc(dinero(r.gastos))}</span></div>
       </div>
     </div>`;
+  if (sinConvertir) {
+    html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no entra${sinConvertir === 1 ? '' : 'n'} en los totales porque falta su tipo de cambio.</p>`;
+  }
 
   if (!hayMovs && !filas.length) {
     html += `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🌱</span>
@@ -151,6 +161,7 @@ function pintarMovimientos() {
       No hay movimientos en ${esc(C.nombreMes(mes).toLowerCase())}.</div>`;
     return;
   }
+  const tasas = C.tasasImplicitas(datos.movimientos);
   let html = '';
   let diaActual = '';
   for (const m of lista) {
@@ -161,17 +172,67 @@ function pintarMovimientos() {
     }
     const c = categoria(m.categoria);
     const signo = m.tipo === 'ingreso' ? '+' : '−';
+    const moneda = m.moneda || datos.moneda;
+    const otraMoneda = moneda !== datos.moneda;
+    const enPrincipal = otraMoneda ? C.valorEn(m, datos.moneda, tasas) : null;
+    let detalle = m.nota ? c.nombre : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto');
+    if (otraMoneda) detalle += enPrincipal != null ? ` · ${dinero(enPrincipal)}` : ' · sin tipo de cambio';
     html += `<li><button type="button" class="mov" data-accion="editar-mov" data-id="${esc(m.id)}">
       <span class="emoji" aria-hidden="true">${esc(c.emoji)}</span>
       <span class="texto">
         <span class="titulo">${esc(m.nota || c.nombre)}</span>
-        <span class="detalle">${esc(m.nota ? c.nombre : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto'))}</span>
+        <span class="detalle">${esc(detalle)}</span>
       </span>
-      <span class="importe ${m.tipo}">${signo}${esc(dinero(m.importe))}</span>
+      <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, moneda))}</span>
     </button></li>`;
   }
   html += `</ul>`;
   $('#vista-movimientos').innerHTML = html;
+}
+
+function pintarHistorial() {
+  const { movs, sinConvertir, tasas } = enBase();
+  const hoy = C.claveMes(C.hoyISO());
+  const meses = C.historial(movs, hoy, 12);
+  if (!meses.length) {
+    $('#vista-historial').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📈</span>
+      Cuando apuntes movimientos, aquí verás tus ingresos y gastos mes a mes.</div>`;
+    return;
+  }
+  const maximo = Math.max(1, ...meses.map((f) => Math.max(f.ingresos, f.gastos)));
+  const pct = (v) => Math.round((v / maximo) * 100);
+  let html = `<div class="tarjeta"><h2>Mes a mes</h2>
+    <div class="leyenda"><span><i style="background:var(--ingreso)"></i>Ingresos</span><span><i style="background:var(--gasto)"></i>Gastos</span></div>`;
+  for (const f of meses) {
+    const monedas = Object.keys(f.ingresosPorMoneda);
+    const desglose = monedas.length > 1 || (monedas.length === 1 && monedas[0] !== datos.moneda)
+      ? monedas.map((mo) => C.formatoMoneda(f.ingresosPorMoneda[mo], mo)).join(' + ')
+      : '';
+    html += `
+      <div class="hist-fila">
+        <span class="hist-mes">${esc(C.nombreMes(f.clave).slice(0, 3))} ${esc(f.clave.slice(2, 4))}</span>
+        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno ing" style="width:${pct(f.ingresos)}%"></div></div><span class="cifra-p">${esc(dinero(f.ingresos))}</span></div>
+        <div class="hist-linea"><div class="barra-fondo"><div class="barra-relleno gas" style="width:${pct(f.gastos)}%"></div></div><span class="cifra-p">${esc(dinero(f.gastos))}</span></div>
+        ${desglose ? `<span class="hist-desglose">Ingresos: ${esc(desglose)}</span>` : ''}
+        <span class="hist-saldo">${f.saldo >= 0 ? 'Sobró' : 'Faltó'} ${esc(dinero(Math.abs(f.saldo)))}</span>
+      </div>`;
+  }
+  html += `</div>`;
+  if (sinConvertir) {
+    html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no se cuentan porque falta su tipo de cambio.</p>`;
+  }
+  const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, hoy, 12);
+  if (tipos.length) {
+    html += `<div class="tarjeta"><h2>Tipo de cambio de cada mes</h2>
+      <p class="explica">Sale de lo que de verdad te cobraron en tus movimientos en otra moneda.</p>`;
+    for (const t of tipos) {
+      html += `<h3 class="grupo-titulo">${esc(C.MONEDAS[t.moneda].nombre)}</h3><table class="tabla-tc"><tbody>`;
+      for (const f of t.meses) html += `<tr><td>${esc(C.nombreMes(f.clave))}</td><td>${esc(C.textoTipoDeCambio(t.moneda, datos.moneda, f.valor))}</td></tr>`;
+      html += `</tbody></table>`;
+    }
+    html += `</div>`;
+  }
+  $('#vista-historial').innerHTML = html;
 }
 
 function pintarAjustes() {
@@ -187,9 +248,10 @@ function pintarAjustes() {
 
   $('#vista-ajustes').innerHTML = `
     <div class="tarjeta">
-      <h2>Moneda</h2>
+      <h2>Moneda principal</h2>
+      <p class="explica">Los totales, los presupuestos y el historial se ven en esta moneda. Cada movimiento se apunta en la moneda en que se pagó.</p>
       <div class="ajuste">
-        <label for="moneda">Mostrar importes en</label>
+        <label for="moneda">Ver totales en</label>
         <select id="moneda">${opciones}</select>
       </div>
     </div>
@@ -220,7 +282,7 @@ function pintarAjustes() {
   $('#moneda').addEventListener('change', (e) => {
     datos.moneda = e.target.value;
     guardar();
-    aviso(`Importes en ${C.MONEDAS[datos.moneda].nombre.toLowerCase()}`);
+    aviso(`Totales en ${nombreCorto[datos.moneda] || datos.moneda}`);
     pintar();
   });
 }
@@ -251,7 +313,11 @@ function abrirMovimiento(id = null) {
   $('#dlg-mov-titulo').textContent = m ? 'Editar movimiento' : 'Nuevo movimiento';
   $('#mov-borrar').hidden = !m;
   $('#mov-error').hidden = true;
-  $('#mov-simbolo').textContent = C.simboloMoneda(datos.moneda);
+  const moneda = m ? (m.moneda || datos.moneda) : (ultimaMoneda || datos.moneda);
+  $('#mov-moneda').innerHTML = Object.keys(C.MONEDAS)
+    .map((cod) => `<option value="${cod}" ${cod === moneda ? 'selected' : ''}>${cod}</option>`).join('');
+  baseTocada = !!(m && m.importeBase && m.monedaBase === datos.moneda);
+  $('#mov-importe-base').value = baseTocada ? C.importeEditable(m.importeBase) : '';
   const tipo = m ? m.tipo : 'gasto';
   document.querySelector(`#form-mov input[name="tipo"][value="${tipo}"]`).checked = true;
   $('#mov-importe').value = m ? C.importeEditable(m.importe) : '';
@@ -262,19 +328,51 @@ function abrirMovimiento(id = null) {
   const porDefecto = datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
     || datos.categorias.find((c) => c.tipo === tipo);
   pintarChips(m ? m.categoria : porDefecto?.id);
+  actualizarBase();
   $('#dlg-mov').showModal();
   if (!m) setTimeout(() => $('#mov-importe').focus(), 50);
+}
+
+// Si el movimiento va en otra moneda, pide lo que costó en la principal y lo propone con el último tipo de cambio.
+function actualizarBase() {
+  const moneda = $('#mov-moneda').value;
+  const otra = moneda !== datos.moneda;
+  $('#mov-base').hidden = !otra;
+  if (!otra) return;
+  $('#mov-base-etiqueta').textContent = `${tipoMov() === 'ingreso' ? 'Lo que recibiste' : 'Lo que te costó'} en ${nombreCorto[datos.moneda] || datos.moneda}`;
+  const importe = C.parseImporte($('#mov-importe').value);
+  const fecha = C.esFechaISO($('#mov-fecha').value) ? $('#mov-fecha').value : C.hoyISO();
+  const otros = datos.movimientos.filter((x) => x.id !== editandoMov);
+  const t = C.tasa(C.tasasImplicitas(otros), moneda, datos.moneda, C.claveMes(fecha));
+  if (!baseTocada) $('#mov-importe-base').value = importe != null && t != null ? C.importeEditable(Math.round(importe * t)) : '';
+  const base = C.parseImporte($('#mov-importe-base').value);
+  const nota = $('#mov-tasa');
+  if (importe != null && base != null) nota.textContent = `Tipo de cambio: ${C.textoTipoDeCambio(moneda, datos.moneda, base / importe)}`;
+  else if (t == null) nota.textContent = 'Mira en tu estado de cuenta cuánto te cobraron y escríbelo aquí.';
+  else nota.textContent = '';
 }
 
 function guardarMovimiento() {
   const importe = C.parseImporte($('#mov-importe').value);
   const fecha = $('#mov-fecha').value;
+  const moneda = $('#mov-moneda').value;
   const err = $('#mov-error');
   if (importe == null) { err.textContent = 'Escribe un importe mayor que cero.'; err.hidden = false; $('#mov-importe').focus(); return; }
   if (!C.esFechaISO(fecha)) { err.textContent = 'Elige una fecha.'; err.hidden = false; return; }
+  let importeBase = null;
+  if (moneda !== datos.moneda) {
+    importeBase = C.parseImporte($('#mov-importe-base').value);
+    if (importeBase == null) {
+      err.textContent = `Escribe también cuánto fue en ${nombreCorto[datos.moneda] || datos.moneda}.`;
+      err.hidden = false; $('#mov-importe-base').focus(); return;
+    }
+  }
   const tipo = tipoMov();
   const cat = catSeleccionada();
-  const campos = { tipo, importe, categoria: cat, nota: $('#mov-nota').value.trim().slice(0, 200), fecha };
+  const campos = {
+    tipo, importe, moneda, importeBase, monedaBase: importeBase ? datos.moneda : null,
+    categoria: cat, nota: $('#mov-nota').value.trim().slice(0, 200), fecha,
+  };
   if (editandoMov) {
     const m = datos.movimientos.find((x) => x.id === editandoMov);
     if (m) Object.assign(m, campos);
@@ -282,6 +380,7 @@ function guardarMovimiento() {
     datos.movimientos.push({ id: C.nuevoId(), creado: Date.now(), ...campos });
   }
   if (cat) ultimaCategoria[tipo] = cat;
+  ultimaMoneda = moneda;
   if (!guardar()) return;
   $('#dlg-mov').close();
   mes = C.claveMes(fecha);
@@ -468,8 +567,13 @@ for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
     const def = datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
       || datos.categorias.find((c) => c.tipo === tipo);
     pintarChips(def?.id);
+    actualizarBase();
   });
 }
+$('#mov-moneda').addEventListener('change', () => { baseTocada = false; actualizarBase(); });
+$('#mov-importe').addEventListener('input', actualizarBase);
+$('#mov-fecha').addEventListener('change', actualizarBase);
+$('#mov-importe-base').addEventListener('input', () => { baseTocada = $('#mov-importe-base').value.trim() !== ''; actualizarBase(); });
 for (const r of document.querySelectorAll('#form-cat input[name="cat-tipo"]')) {
   r.addEventListener('change', () => { $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso'; });
 }

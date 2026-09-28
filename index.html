@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="ae924d581b">
+  <meta name="version" content="11c0e35c0e">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -34,8 +34,9 @@
   <main id="contenido">
     <section id="vista-resumen" class="vista" aria-label="Resumen del mes"></section>
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
+    <section id="vista-historial" class="vista" aria-label="Historial mes a mes" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.1 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.2 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -43,6 +44,7 @@
   <nav class="barra" aria-label="Secciones">
     <button type="button" data-vista="resumen" aria-current="page"><span aria-hidden="true">◔</span>Resumen</button>
     <button type="button" data-vista="movimientos"><span aria-hidden="true">≡</span>Movimientos</button>
+    <button type="button" data-vista="historial"><span aria-hidden="true">▤</span>Historial</button>
     <button type="button" data-vista="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
   </nav>
 
@@ -57,10 +59,17 @@
         <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
         <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
       </div>
-      <label class="campo-importe">
-        <span class="simbolo" id="mov-simbolo">$</span>
+      <div class="campo-importe">
+        <select id="mov-moneda" class="selector-moneda" aria-label="Moneda"></select>
         <input id="mov-importe" name="importe" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Importe">
-      </label>
+      </div>
+      <div id="mov-base" class="bloque-base" hidden>
+        <label class="campo">
+          <span id="mov-base-etiqueta">Lo que te costó en pesos</span>
+          <input id="mov-importe-base" inputmode="decimal" autocomplete="off" placeholder="0">
+        </label>
+        <p class="nota-tasa" id="mov-tasa"></p>
+      </div>
       <p class="error" id="mov-error" hidden></p>
       <div class="chips" id="mov-categorias" role="radiogroup" aria-label="Categoría"></div>
       <label class="campo">

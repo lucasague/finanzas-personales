@@ -182,7 +182,7 @@ select {
 .fab:active { transform: scale(.96); }
 .barra {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--superficie); border-top: 1px solid var(--borde);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -233,7 +233,30 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   border-bottom: 2px solid var(--borde); margin-bottom: 12px; padding: 4px 4px;
 }
 .campo-importe:focus-within { border-color: var(--acento); }
-.campo-importe .simbolo { font-size: 1.6rem; color: var(--texto-suave); }
+.selector-moneda {
+  flex: none; min-height: 44px; padding: 0 8px; border-radius: 10px; font-weight: 650;
+  border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto);
+}
+.bloque-base { background: var(--superficie-2); border-radius: 12px; padding: 10px 12px 2px; margin-bottom: 14px; }
+.bloque-base .campo input { background: var(--superficie); }
+.nota-tasa { font-size: .82rem; color: var(--texto-suave); margin: -4px 0 8px; }
+
+/* Historial */
+.hist-fila { display: grid; grid-template-columns: 5.5em 1fr; gap: 2px 10px; align-items: center; margin-bottom: 12px; }
+.hist-fila:last-child { margin-bottom: 0; }
+.hist-mes { font-weight: 650; font-size: .9rem; grid-row: span 2; }
+.hist-linea { display: flex; align-items: center; gap: 8px; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.hist-linea .barra-fondo { flex: 1; margin: 0; height: 8px; }
+.hist-linea .cifra-p { min-width: 6.5em; text-align: right; }
+.barra-relleno.ing { background: var(--ingreso); }
+.barra-relleno.gas { background: var(--gasto); }
+.hist-desglose { grid-column: 2; font-size: .78rem; color: var(--texto-suave); }
+.hist-saldo { grid-column: 2; font-size: .78rem; color: var(--texto-suave); }
+.tabla-tc { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.tabla-tc td { padding: 6px 0; border-bottom: 1px solid var(--borde); }
+.tabla-tc td:last-child { text-align: right; }
+.leyenda { display: flex; gap: 14px; font-size: .78rem; color: var(--texto-suave); margin: -4px 0 12px; }
+.leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
 .campo-importe input {
   flex: 1; min-width: 0; border: 0; background: none; outline: none;
   font-size: 2.2rem; font-weight: 700; font-variant-numeric: tabular-nums; padding: 4px 0;
