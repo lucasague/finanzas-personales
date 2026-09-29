@@ -48,6 +48,7 @@ export function datosIniciales() {
     movimientos: [],
     sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
     esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
+    esperadosMes: [], // lo esperado de un mes concreto, cuando no es lo habitual
   };
 }
 
@@ -361,6 +362,7 @@ export function validarCopia(obj) {
         sinColocar: Array.isArray(obj.sinColocar) ? [...new Set(obj.sinColocar.filter((x) => ids.has(x)))] : [],
         // Hasta la versión 5 no había ingreso esperado.
         esperados: validarEsperados(obj.esperados),
+        esperadosMes: validarEsperadosMes(obj.esperadosMes),
       },
       descartados,
     };
@@ -566,6 +568,40 @@ function validarEsperados(lista) {
   return res;
 }
 
+// Lo esperado cambia de un mes a otro: cada mes puede tener su propio importe, { grupo, mes, importe, moneda },
+// que sustituye a lo habitual de esa línea ese mes.
+function validarEsperadosMes(lista) {
+  if (!Array.isArray(lista)) return [];
+  const vistos = new Set();
+  const res = [];
+  for (const a of lista) {
+    if (!a || typeof a.grupo !== 'string' || !a.grupo || !esClaveMes(a.mes) || !Number.isInteger(a.importe) || a.importe <= 0) continue;
+    const k = `${a.grupo}|${a.mes}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    res.push({ grupo: a.grupo, mes: a.mes, importe: a.importe, moneda: MONEDAS[a.moneda] ? a.moneda : 'MXN' });
+  }
+  return res;
+}
+
+/** Importe y moneda de una línea en un mes: el propio de ese mes si lo tiene, si no lo habitual. */
+export function importeDelMes(e, clave, esperadosMes) {
+  const a = (esperadosMes || []).find((x) => x.grupo === e.grupo && x.mes === clave);
+  return a ? { importe: a.importe, moneda: a.moneda, propio: true } : { importe: e.importe, moneda: e.moneda, propio: false };
+}
+
+/**
+ * Pone los importes propios de una línea: `porMes` es { mes: importe | null }; null (o igual a lo habitual)
+ * quita el propio de ese mes. Devuelve la lista nueva.
+ */
+export function ponerEsperadosMes(esperadosMes, grupo, porMes, habitual, moneda) {
+  const res = (esperadosMes || []).filter((a) => !(a.grupo === grupo && a.mes in porMes));
+  for (const [mes, importe] of Object.entries(porMes)) {
+    if (importe != null && importe !== habitual) res.push({ grupo, mes, importe, moneda });
+  }
+  return res;
+}
+
 const cubre = (e, clave) => e.desde <= clave && (!e.hasta || clave <= e.hasta);
 
 /** Los tramos que cuentan en ese mes. */
@@ -616,9 +652,10 @@ export function quitarEsperado(esperados, grupo, desde) {
  * moneda se pasa con el tipo de cambio de ese mes (o el más cercano que se conozca); si no hay ninguno, esa línea
  * cuenta en sinTasa y no suma.
  */
-export function esperadoDelMes(esperados, clave, base, tasas) {
+export function esperadoDelMes(esperados, clave, base, tasas, esperadosMes = []) {
   const r = { total: 0, porMoneda: {}, lineas: [], sinTasa: 0 };
-  for (const e of esperadosDelMes(esperados, clave)) {
+  for (const tramo of esperadosDelMes(esperados, clave)) {
+    const e = { ...tramo, ...importeDelMes(tramo, clave, esperadosMes) };
     const t = tasa(tasas, e.moneda, base, clave);
     const enBase = t == null ? null : Math.round(e.importe * t);
     r.lineas.push({ ...e, enBase });
@@ -634,9 +671,9 @@ export function esperadoDelMes(esperados, clave, base, tasas) {
  * sinTasa, hayEsperado }], y los totales del año contando solo los meses que tienen algo esperado. Recibe los
  * movimientos ya pasados por enMonedaBase.
  */
-export function esperadoVsReal(movs, esperados, desde, base, tasas) {
+export function esperadoVsReal(movs, esperados, desde, base, tasas, esperadosMes = []) {
   const meses = totalesPorMes(movs, mesesDelAño(desde)).map((f) => {
-    const e = esperadoDelMes(esperados, f.clave, base, tasas);
+    const e = esperadoDelMes(esperados, f.clave, base, tasas, esperadosMes);
     return { clave: f.clave, esperado: e.total, real: f.ingresos, diferencia: f.ingresos - e.total, sinTasa: e.sinTasa, hayEsperado: e.lineas.length > 0 };
   });
   return { meses, hayAlguno: meses.some((f) => f.hayEsperado) };

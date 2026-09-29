@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="4be27768ec">
+  <meta name="version" content="dcc65de369">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -201,7 +201,7 @@
       <p class="etiqueta-moneda">En qué moneda lo recibes</p>
       <div class="segmentado monedas" id="esp-moneda" role="radiogroup" aria-label="Moneda"></div>
       <label class="campo">
-        <span>Cuánto esperas al mes</span>
+        <span>Lo habitual al mes</span>
         <input id="esp-importe" inputmode="decimal" autocomplete="off" placeholder="0">
       </label>
       <label class="campo">
@@ -209,6 +209,9 @@
         <select id="esp-desde"></select>
       </label>
       <p class="explica" id="esp-explica"></p>
+      <h3 class="grupo-titulo" id="esp-meses-titulo">Mes a mes</h3>
+      <p class="explica">Si algún mes esperas otra cantidad, ponla aquí. Los que dejes vacíos cuentan lo habitual.</p>
+      <div class="esp-meses" id="esp-meses"></div>
       <p class="error" id="esp-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-esperado" id="esp-borrar" hidden>Ya no lo espero</button>

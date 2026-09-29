@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '4be27768ec';
+const BUILD = 'dcc65de369';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -142,7 +142,7 @@ function pintarResumen() {
   if (sinConvertir) {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no entra${sinConvertir === 1 ? '' : 'n'} en los totales porque falta su tipo de cambio.</p>`;
   }
-  html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas), r.ingresos);
+  html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas, datos.esperadosMes), r.ingresos);
 
   if (!hayMovs && !filas.length) {
     html += `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🌱</span>
@@ -345,7 +345,7 @@ function pintarHistorial() {
 
 /** Esperado frente a real de cada mes del año, en el Historial. */
 function tablaEsperado(movs, tasas, hoy) {
-  const r = C.esperadoVsReal(movs, datos.esperados, año, datos.moneda, tasas);
+  const r = C.esperadoVsReal(movs, datos.esperados, año, datos.moneda, tasas, datos.esperadosMes);
   if (!r.hayAlguno) {
     return `<div class="tarjeta"><h2>Esperado y real</h2>
       <p class="explica">Pon cuánto esperas ingresar al mes y aquí lo verás junto a lo que de verdad entró, mes a mes.</p>
@@ -367,7 +367,7 @@ function tablaEsperado(movs, tasas, hoy) {
   }
   const hayTasa = r.meses.some((f) => f.sinTasa);
   return `<div class="tarjeta"><h2>Esperado y real</h2>
-    <p class="explica">Lo que esperabas ingresar cada mes y lo que de verdad entró. Los meses que aún no han llegado solo muestran lo esperado.</p>
+    <p class="explica">Lo que esperabas ingresar cada mes y lo que de verdad entró. Los meses que aún no han llegado solo muestran lo esperado. Para poner otra cantidad en un mes, toca el ingreso en Ajustes.</p>
     <table class="tabla-esperado">
       <thead><tr><th></th><th>Esperado</th><th>Real</th><th>Diferencia</th></tr></thead>
       <tbody>${filas}</tbody>
@@ -439,7 +439,7 @@ function pintarAjustes() {
     </div>
     <div class="tarjeta">
       <h2>Ingreso esperado al mes</h2>
-      <p class="explica">Lo que cuentas con recibir cada mes (el sueldo, una renta…). En el Resumen y en el Historial lo verás junto a lo que de verdad entró. Si algo cambia, lo cambias desde el mes que toque y los meses de antes se quedan como estaban.</p>
+      <p class="explica">Lo que cuentas con recibir cada mes (el sueldo, una renta…). Pones lo habitual y, si algún mes es distinto, esa cantidad en ese mes. En el Resumen y en el Historial lo verás junto a lo que de verdad entró.</p>
       ${listaEsperados}
       <button type="button" class="boton-linea" data-accion="nuevo-esperado">+ Añadir ingreso esperado</button>
     </div>
@@ -966,10 +966,22 @@ function abrirEsperado(grupo = null) {
   $('#esp-explica').textContent = e
     ? 'Los meses de antes se quedan con lo que tenían.'
     : 'Si eliges un mes pasado, verás también cómo te fue esos meses.';
+  pintarMesesEsperado(grupo);
   $('#esp-borrar').hidden = !e;
   $('#esp-error').hidden = true;
   $('#dlg-esperado').showModal();
   if (!e) setTimeout(() => $('#esp-nombre').focus(), 50);
+}
+
+/** Un campo por mes del año que se ve en el Historial, con el importe propio de ese mes si lo tiene. */
+function pintarMesesEsperado(grupo) {
+  $('#esp-meses-titulo').textContent = `Mes a mes (${C.nombreAño(año)})`;
+  const propios = new Map((datos.esperadosMes || []).filter((a) => a.grupo === grupo).map((a) => [a.mes, a.importe]));
+  $('#esp-meses').innerHTML = C.mesesDelAño(año).map((k) => `
+    <label class="campo esp-mes">
+      <span>${esc(C.nombreMes(k))}</span>
+      <input data-mes="${k}" inputmode="decimal" autocomplete="off" placeholder="Lo habitual" value="${propios.has(k) ? esc(C.importeEditable(propios.get(k))) : ''}">
+    </label>`).join('');
 }
 
 function guardarEsperado() {
@@ -979,7 +991,16 @@ function guardarEsperado() {
   const importe = C.parseImporte($('#esp-importe').value);
   if (importe == null) { err.textContent = 'Pon cuánto esperas al mes.'; err.hidden = false; return; }
   const moneda = document.querySelector('#esp-moneda input:checked')?.value || datos.moneda;
+  const porMes = {};
+  for (const inp of document.querySelectorAll('#esp-meses input')) {
+    const txt = inp.value.trim();
+    const v = txt ? C.parseImporte(txt) : null;
+    if (txt && v == null) { err.textContent = `En ${C.nombreMes(inp.dataset.mes).toLowerCase()} pon un importe, o déjalo vacío.`; err.hidden = false; return; }
+    porMes[inp.dataset.mes] = v;
+  }
   datos.esperados = C.ponerEsperado(datos.esperados, editandoEsperado, { nombre, importe, moneda }, $('#esp-desde').value);
+  const grupo = editandoEsperado || datos.esperados[datos.esperados.length - 1].grupo;
+  datos.esperadosMes = C.ponerEsperadosMes(datos.esperadosMes, grupo, porMes, importe, moneda);
   if (!guardar()) return;
   $('#dlg-esperado').close();
   aviso('Ingreso esperado guardado');
