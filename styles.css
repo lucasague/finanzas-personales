@@ -116,6 +116,15 @@ main { max-width: 640px; margin: 0 auto; padding: 4px 16px 88px; }
 .barra-relleno.pasado { background: var(--gasto); }
 .cat-nota { font-size: .82rem; color: var(--texto-suave); }
 .cat-nota.pasado { color: var(--gasto); }
+/* Una categoría con subcategorías se despliega al tocarla. */
+details.cat-fila > summary { list-style: none; cursor: pointer; border-radius: 8px; }
+details.cat-fila > summary::-webkit-details-marker { display: none; }
+.desplegar { display: inline-block; width: 1em; color: var(--texto-suave); transition: transform .15s; }
+details[open] > summary .desplegar { transform: rotate(90deg); }
+.desglose { margin: 10px 0 4px 6px; padding-left: 12px; border-left: 2px solid var(--borde); }
+.desglose .cat-fila { margin-bottom: 10px; }
+.desglose .barra-fondo { height: 7px; }
+.desglose .cat-nombre { font-weight: 500; }
 
 .vacio { text-align: center; color: var(--texto-suave); padding: 28px 12px; }
 .vacio .grande { font-size: 2rem; display: block; margin-bottom: 6px; }
@@ -152,6 +161,9 @@ select {
   padding: 6px 2px; text-align: left;
 }
 .cat-edit:first-of-type { border-top: 0; }
+.cat-edit.nivel-2 { padding-left: 24px; }
+.cat-edit.nivel-3 { padding-left: 48px; }
+.cat-edit.nivel-2 .emoji, .cat-edit.nivel-3 .emoji { font-size: 1rem; width: 20px; }
 .cat-edit .emoji { font-size: 1.3rem; width: 30px; text-align: center; }
 .cat-edit .texto { flex: 1; }
 .cat-edit .detalle { font-size: .82rem; color: var(--texto-suave); }
@@ -277,6 +289,31 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   display: inline-flex; align-items: center; gap: 6px;
 }
 .chip[aria-checked="true"] { background: var(--acento-suave); border-color: var(--acento); font-weight: 650; }
+/* Subcategorías al apuntar: una fila por nivel debajo de la elegida. */
+.cat-niveles { margin-bottom: 14px; }
+.cat-niveles .chips { margin-bottom: 8px; }
+.cat-niveles .chips.sub { margin-left: 8px; padding-left: 10px; border-left: 2px solid var(--acento); }
+.chips-etq { flex-basis: 100%; font-size: .82rem; color: var(--texto-suave); }
+.se-guarda { font-size: .82rem; color: var(--texto-suave); margin: 0; }
+
+/* Organizar con una lista */
+.texto-lista {
+  width: 100%; min-height: 240px; padding: 10px 12px; border-radius: 10px; resize: vertical;
+  border: 1px solid var(--borde); background: var(--superficie-2); font: 15px/1.5 ui-monospace, Menlo, Consolas, monospace;
+  margin-bottom: 12px;
+}
+.lista-cambios { margin: 0 0 12px; padding-left: 20px; font-size: .92rem; }
+.lista-cambios li + li { margin-top: 4px; }
+.lista-cambios details { color: var(--texto-suave); }
+.arbol { list-style: none; margin: 0 0 12px; padding: 0; font-size: .92rem; }
+.arbol li { padding: 3px 0; border-top: 1px solid var(--borde); display: flex; justify-content: space-between; gap: 8px; }
+.arbol li.nivel-2 { padding-left: 20px; }
+.arbol li.nivel-3 { padding-left: 40px; }
+.arbol .etq { font-size: .78rem; color: var(--texto-suave); white-space: nowrap; }
+.arbol .etq.nueva { color: var(--acento); font-weight: 600; }
+.campo select { width: 100%; }
+.tarjeta.sin-colocar { border-left: 4px solid var(--aviso); }
+.boton-linea[hidden], #cat-pasar[hidden] { display: none; }
 
 .campo { display: block; margin-bottom: 12px; flex: 1; }
 .campo > span { display: block; font-size: .82rem; color: var(--texto-suave); margin-bottom: 4px; }

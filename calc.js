@@ -35,7 +35,7 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 4;
+export const VERSION_DATOS = 5;
 export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
@@ -43,9 +43,10 @@ export function datosIniciales() {
     version: VERSION_DATOS,
     moneda: 'MXN',
     inicioAño: INICIO_AÑO_POR_DEFECTO,
-    categorias: CATEGORIAS_POR_DEFECTO.map((c) => ({ ...c, presupuesto: null })),
+    categorias: CATEGORIAS_POR_DEFECTO.map((c) => ({ ...c, presupuesto: null, padre: null })),
     cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
+    sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
   };
 }
 
@@ -199,42 +200,65 @@ export function resumenMes(movimientos, clave) {
 }
 
 /**
- * Gasto del mes por categoría, de mayor a menor. Incluye las categorías con presupuesto aunque no
- * tengan gasto (para ver cuánto queda). Los gastos de categorías borradas van a "Sin categoría".
- * fraccion: gastado/presupuesto si hay presupuesto; si no, gastado/mayor gasto (para dibujar la barra).
+ * Gasto del mes por categoría principal, de mayor a menor: cada una suma lo suyo y lo de todas sus
+ * subcategorías. Incluye las categorías con presupuesto aunque no tengan gasto (para ver cuánto queda). Los
+ * gastos de categorías borradas van a "Sin categoría".
+ * Cada fila trae `hijos` con el desglose (filas iguales, una por subcategoría, más "(sin subcategoría)" si hay
+ * gastos apuntados directamente en la de arriba). Un presupuesto puede estar en cualquier nivel y se compara con
+ * lo de esa categoría más lo de sus subcategorías.
+ * fraccion: gastado/presupuesto si hay presupuesto; si no, en las principales gastado/mayor gasto y en las
+ * subcategorías gastado/gasto de la de arriba (para dibujar la barra).
  * `clave` puede ser un mes o una lista de meses (un año); con conPresupuesto: false no se miran los
  * presupuestos, que son al mes.
  */
 export function gastoPorCategoria(movimientos, clave, categorias, { conPresupuesto = true } = {}) {
   const claves = new Set(Array.isArray(clave) ? clave : [clave]);
-  const porId = new Map();
-  for (const c of categorias) {
-    if (c.tipo !== 'gasto') continue;
-    porId.set(c.id, { categoria: c, gastado: 0 });
-  }
-  const huerfana = { categoria: { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null }, gastado: 0 };
+  const cats = normalizarArbol(categorias.filter((c) => c.tipo === 'gasto'));
+  const original = new Map(categorias.map((c) => [c.id, c])); // en las filas van las de verdad, no las copias
+  const directo = new Map();
+  let huerfano = 0;
   for (const m of movimientos) {
     if (m.tipo !== 'gasto' || !claves.has(claveMes(m.fecha))) continue;
-    const fila = porId.get(m.categoria) || huerfana;
-    fila.gastado += m.importe;
+    if (original.has(m.categoria) && original.get(m.categoria).tipo === 'gasto') {
+      directo.set(m.categoria, (directo.get(m.categoria) || 0) + m.importe);
+    } else huerfano += m.importe;
   }
-  const filas = [...porId.values()];
-  if (huerfana.gastado > 0) filas.push(huerfana);
-  const conPres = (f) => conPresupuesto && f.categoria.presupuesto > 0;
-  const visibles = filas.filter((f) => f.gastado > 0 || conPres(f));
-  const maximo = Math.max(1, ...visibles.map((f) => f.gastado));
-  return visibles
-    .map((f) => {
-      const p = conPres(f) ? f.categoria.presupuesto : null;
-      return {
-        categoria: f.categoria,
-        gastado: f.gastado,
-        presupuesto: p,
-        restante: p != null ? p - f.gastado : null,
-        fraccion: p != null ? f.gastado / p : f.gastado / maximo,
-      };
-    })
-    .sort((a, b) => b.gastado - a.gastado || (b.presupuesto || 0) - (a.presupuesto || 0));
+  const hijas = new Map();
+  for (const c of cats) {
+    if (!hijas.has(c.padre)) hijas.set(c.padre, []);
+    hijas.get(c.padre).push(c);
+  }
+  const conPres = (c) => conPresupuesto && c.presupuesto > 0;
+  const ordenar = (filas) => filas.sort((a, b) => b.gastado - a.gastado || (b.presupuesto || 0) - (a.presupuesto || 0));
+  const acabar = (f, total) => {
+    const p = conPres(f.categoria) ? f.categoria.presupuesto : null;
+    const fila = {
+      categoria: f.categoria,
+      gastado: f.gastado,
+      presupuesto: p,
+      restante: p != null ? p - f.gastado : null,
+      fraccion: p != null ? f.gastado / p : f.gastado / Math.max(1, total),
+      hijos: [],
+    };
+    fila.hijos = f.hijos.map((h) => acabar(h, f.gastado));
+    if (f.sinSub) fila.sinSub = true;
+    return fila;
+  };
+  const fila = (c) => {
+    const subs = (hijas.get(c.id) || []).map(fila).filter((f) => f.visible);
+    const propio = directo.get(c.id) || 0;
+    const gastado = propio + subs.reduce((t, f) => t + f.gastado, 0);
+    const hijos = ordenar(subs);
+    if (hijos.length && propio > 0) {
+      hijos.push({ categoria: { id: c.id, emoji: '', nombre: '(sin subcategoría)', tipo: 'gasto', presupuesto: null }, gastado: propio, hijos: [], sinSub: true });
+      ordenar(hijos);
+    }
+    return { categoria: original.get(c.id), gastado, hijos, visible: gastado > 0 || conPres(c) || hijos.length > 0 };
+  };
+  const filas = (hijas.get(null) || []).map(fila).filter((f) => f.visible);
+  if (huerfano > 0) filas.push({ categoria: { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null }, gastado: huerfano, hijos: [] });
+  const maximo = Math.max(1, ...filas.map((f) => f.gastado));
+  return ordenar(filas.map((f) => acabar(f, maximo)));
 }
 
 /**
@@ -279,6 +303,10 @@ export function validarCopia(obj) {
         nombre: typeof c.nombre === 'string' && c.nombre.trim() ? c.nombre.trim().slice(0, 40) : 'Sin nombre',
         tipo: c.tipo === 'ingreso' ? 'ingreso' : 'gasto',
         presupuesto: c.tipo === 'ingreso' ? null : pres,
+        // Hasta la versión 4 no había subcategorías: todas son principales.
+        padre: typeof c.padre === 'string' && c.padre ? c.padre : null,
+        ...(Array.isArray(c.otrosNombres) && c.otrosNombres.some((x) => typeof x === 'string' && x.trim())
+          ? { otrosNombres: c.otrosNombres.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 40)).slice(0, 30) } : {}),
       });
     }
     // Hasta la versión 2 no había cuentas: se ponen las de partida.
@@ -327,7 +355,10 @@ export function validarCopia(obj) {
     }
     return {
       ok: true,
-      datos: { version: VERSION_DATOS, moneda, inicioAño, categorias, cuentas, movimientos },
+      datos: {
+        version: VERSION_DATOS, moneda, inicioAño, categorias: normalizarArbol(categorias), cuentas, movimientos,
+        sinColocar: Array.isArray(obj.sinColocar) ? [...new Set(obj.sinColocar.filter((x) => ids.has(x)))] : [],
+      },
       descartados,
     };
   } catch (e) {
@@ -603,7 +634,19 @@ const sumarUno = (mapa, k) => mapa.set(k, (mapa.get(k) || 0) + 1);
 export function prepararWallet(filas, datos) {
   const yaEstan = new Set(datos.movimientos.filter((m) => m.origen === 'wallet' && m.claveOrigen).map((m) => m.claveOrigen));
   const cuentasPorNombre = new Map(datos.cuentas.map((c) => [c.nombre.trim().toLowerCase(), c.id]));
-  const catsPorNombre = new Map(datos.categorias.map((c) => [nombreComparable(c.nombre), c.id]));
+  // Una categoría de Wallet va a la que ya tenga ese nombre, esté en el nivel que esté (la primera si hay varias).
+  const catsPorNombre = new Map();
+  for (const c of datos.categorias) {
+    const k = claveCategoria(c.nombre);
+    if (!catsPorNombre.has(k)) catsPorNombre.set(k, c.id);
+  }
+  // También por los nombres de las que se juntaron en ella (tras organizar con una lista o pasar sus movimientos).
+  for (const c of datos.categorias) {
+    for (const otro of c.otrosNombres || []) {
+      const k = claveCategoria(otro);
+      if (!catsPorNombre.has(k)) catsPorNombre.set(k, c.id);
+    }
+  }
   const cuentasNuevas = new Map(); // nombre en minúsculas -> { cuenta, pagos: Map(tipo -> n) }
   const catsNuevas = new Map(); // nombre comparable -> { categoria, tipos: Map(tipo -> n) }
   const movimientos = [];
@@ -639,12 +682,12 @@ export function prepararWallet(filas, datos) {
     }
     let categoria = null;
     if (f.category) {
-      const k = nombreComparable(f.category);
+      const k = claveCategoria(f.category);
       categoria = catsPorNombre.get(k) || null;
       if (!categoria) {
         let n = catsNuevas.get(k);
         if (!n) {
-          n = { categoria: { id: nuevoId(), emoji: EMOJI_CATEGORIA_NUEVA, nombre: f.category.slice(0, 40), tipo, presupuesto: null }, tipos: new Map() };
+          n = { categoria: { id: nuevoId(), emoji: EMOJI_CATEGORIA_NUEVA, nombre: f.category.slice(0, 40), tipo, presupuesto: null, padre: null }, tipos: new Map() };
           catsNuevas.set(k, n);
         }
         sumarUno(n.tipos, tipo);
@@ -692,4 +735,319 @@ export function prepararWallet(filas, datos) {
     desde,
     hasta,
   };
+}
+
+// ---------- Categorías con subcategorías ----------
+// Cada categoría tiene `padre`: el id de otra del mismo tipo, o null si es principal. Como mucho tres niveles
+// (Casa › Servicios › Luz). Los movimientos se pueden apuntar en cualquier nivel.
+
+export const NIVELES_MAX = 3;
+
+/**
+ * Deja el árbol sano (devuelve copias, no toca las originales): el padre tiene que existir, ser del mismo tipo y
+ * no formar un ciclo; lo que quede más hondo del tercer nivel sube hasta el tercero.
+ */
+export function normalizarArbol(categorias) {
+  const cats = categorias.map((c) => ({ ...c, padre: typeof c.padre === 'string' && c.padre ? c.padre : null }));
+  const porId = new Map(cats.map((c) => [c.id, c]));
+  for (const c of cats) {
+    const p = porId.get(c.padre);
+    if (!p || p === c || p.tipo !== c.tipo) c.padre = null;
+  }
+  // Ciclos: si subiendo desde una se vuelve a ella, pasa a principal (y el ciclo se rompe ahí).
+  for (const c of cats) {
+    const vistos = new Set();
+    for (let p = porId.get(c.padre); p && !vistos.has(p.id); p = porId.get(p.padre)) {
+      if (p === c) { c.padre = null; break; }
+      vistos.add(p.id);
+    }
+  }
+  const nivel = (c) => { let n = 1; for (let p = porId.get(c.padre); p; p = porId.get(p.padre)) n++; return n; };
+  for (const c of cats) while (nivel(c) > NIVELES_MAX) c.padre = porId.get(c.padre).padre;
+  return cats;
+}
+
+/** Del principal a la categoría: [Casa, Servicios, Luz]. Vacío si no existe. */
+export function rutaCategoria(categorias, id) {
+  const porId = new Map(categorias.map((c) => [c.id, c]));
+  const ruta = [];
+  for (let c = porId.get(id); c && ruta.length < 10 && !ruta.includes(c); c = porId.get(c.padre)) ruta.unshift(c);
+  return ruta;
+}
+
+/** "Casa › Servicios › Luz" */
+export function textoRuta(categorias, id) {
+  return rutaCategoria(categorias, id).map((c) => c.nombre).join(' › ');
+}
+
+export function nivelCategoria(categorias, id) {
+  return rutaCategoria(categorias, id).length;
+}
+
+/** Subcategorías directas, en su orden. */
+export function hijasDe(categorias, id) {
+  return categorias.filter((c) => c.padre === id && c.id !== id);
+}
+
+/** Ids de la categoría y de todo lo que cuelga de ella. */
+export function descendientes(categorias, id) {
+  const res = new Set([id]);
+  let cambio = true;
+  while (cambio) {
+    cambio = false;
+    for (const c of categorias) if (c.padre && res.has(c.padre) && !res.has(c.id)) { res.add(c.id); cambio = true; }
+  }
+  return res;
+}
+
+/** Cuántos niveles ocupa la categoría con lo que cuelga de ella (1 si no tiene subcategorías). */
+function altura(categorias, id, prof = 0) {
+  const hijas = hijasDe(categorias, id);
+  if (!hijas.length || prof > 10) return 1;
+  return 1 + Math.max(...hijas.map((h) => altura(categorias, h.id, prof + 1)));
+}
+
+/** Las de un tipo en orden de árbol, cada una con su nivel: [{ categoria, nivel }]. */
+export function ordenArbol(categorias, tipo) {
+  const cats = normalizarArbol(categorias.filter((c) => c.tipo === tipo));
+  const original = new Map(categorias.map((c) => [c.id, c]));
+  const res = [];
+  const bajar = (padre, nivel) => {
+    for (const c of cats) {
+      if (c.padre !== padre) continue;
+      res.push({ categoria: original.get(c.id), nivel });
+      bajar(c.id, nivel + 1);
+    }
+  };
+  bajar(null, 1);
+  return res;
+}
+
+/**
+ * Dónde se puede meter la categoría `id` (null si es nueva) siendo del tipo `tipo`: en otra del mismo tipo que no
+ * sea ella ni una de las suyas, y sin pasar de tres niveles contando lo que cuelga de ella.
+ */
+export function padresPosibles(categorias, id, tipo) {
+  const suyas = id ? descendientes(categorias, id) : new Set();
+  const alto = id ? altura(categorias, id) : 1;
+  return ordenArbol(categorias, tipo).filter((f) => !suyas.has(f.categoria.id) && f.nivel + alto <= NIVELES_MAX);
+}
+
+/** Quita una categoría; sus subcategorías suben un nivel (a la de arriba, o a principales). */
+export function quitarCategoria(categorias, id) {
+  const c = categorias.find((x) => x.id === id);
+  if (!c) return categorias;
+  return categorias.filter((x) => x.id !== id).map((x) => (x.padre === id ? { ...x, padre: c.padre || null } : x));
+}
+
+/** Nombre para buscar coincidencias: como nombreComparable y, además, sin la "s" final de cada palabra. */
+export function claveCategoria(s) {
+  return nombreComparable(s).split(' ').map((p) => (p.length > 3 && p.endsWith('s') ? p.slice(0, -1) : p)).join(' ');
+}
+
+/** "Golosinas (Caprichos, Dulces)" -> { antes: 'Golosinas ', dentro: 'Caprichos, Dulces' }; admite paréntesis dentro. */
+function parentesisFinal(s) {
+  const t = s.replace(/[\s:.]+$/, '');
+  if (!t.endsWith(')')) return null;
+  let prof = 0;
+  for (let i = t.length - 1; i >= 0; i--) {
+    if (t[i] === ')') prof++;
+    else if (t[i] === '(' && --prof === 0) return { antes: t.slice(0, i), dentro: t.slice(i + 1, -1) };
+  }
+  return null;
+}
+
+/**
+ * Claves con las que se reconoce una categoría por sus otros nombres. Como hay categorías con comas en el nombre
+ * ("Música, radio"), cada trozo vale solo y también unido a los de al lado.
+ */
+function clavesSinonimos(sinonimos) {
+  const claves = new Set();
+  for (let i = 0; i < sinonimos.length; i++) {
+    for (let j = i; j < sinonimos.length; j++) claves.add(claveCategoria(sinonimos.slice(i, j + 1).join(', ')));
+  }
+  return claves;
+}
+
+/** Claves de una categoría que ya existe: su nombre y, si acaba en paréntesis, también sin él. */
+function clavesNombre(nombre) {
+  const p = parentesisFinal(nombre);
+  return p && p.antes.trim() ? [claveCategoria(nombre), claveCategoria(p.antes)] : [claveCategoria(nombre)];
+}
+
+/**
+ * Lee una lista de categorías escrita a mano: un nombre por línea; las subcategorías con un guion delante ("-",
+ * "–", "•"…) y las del tercer nivel con más sangría o con dos guiones ("--"). Las líneas vacías no cuentan. Un
+ * grupo "Ingresos" quiere decir que lo que va dentro son categorías de ingreso; todo lo demás es gasto.
+ * Entre paréntesis al final, otros nombres que se juntan en esa: "-Golosinas (Caprichos, Dulces)" quiere decir que
+ * las categorías que ya haya con esos nombres pasan sus movimientos a Golosinas y desaparecen.
+ * Las erratas no se corrigen. Devuelve { nodos: [{ nombre, tipo, hijos, sinonimos }], ignoradas: [líneas
+ * demasiado largas para ser un nombre] }. Nunca lanza.
+ */
+export function leerListaCategorias(texto) {
+  const MARCA = /^(?:[-–—•*·]\s*)+/;
+  const raices = [];
+  const ignoradas = [];
+  // Un nombre repetido dentro de la misma categoría es el mismo (se juntan sus subcategorías y sus otros nombres).
+  const agregar = (hermanas, nombre, sinonimos = []) => {
+    const k = claveCategoria(nombre);
+    let n = hermanas.find((x) => claveCategoria(x.nombre) === k);
+    if (!n) { n = { nombre, hijos: [], sinonimos: [] }; hermanas.push(n); }
+    for (const s of sinonimos) {
+      if (!n.sinonimos.some((x) => claveCategoria(x) === claveCategoria(s))) n.sinonimos.push(s);
+    }
+    return n;
+  };
+  let n1 = null;
+  let n2 = null;
+  let sangria1 = 0;
+  let sangria2 = 0;
+  for (const bruta of String(texto ?? '').replace(/^\uFEFF/, '').split(/\r\n|\r|\n/)) {
+    const linea = bruta.replace(/\u00a0/g, ' ');
+    if (!linea.trim()) continue;
+    const sangria = linea.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+    let resto = linea.trim();
+    const marca = resto.match(MARCA);
+    const guiones = marca ? marca[0].replace(/\s/g, '').length : 0;
+    if (marca) resto = resto.slice(marca[0].length);
+    let sinonimos = [];
+    const parentesis = parentesisFinal(resto);
+    if (parentesis) {
+      sinonimos = parentesis.dentro.split(/[,;/]/).map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      resto = parentesis.antes;
+    }
+    const nombre = resto.replace(/[:.]+$/, '').replace(/\s+/g, ' ').trim();
+    if (!nombre) continue;
+    if (nombre.length > 40) { ignoradas.push(linea.trim()); continue; }
+    let nivel;
+    if (guiones >= 2) nivel = 3;
+    else if (guiones === 1 || (n1 && sangria > sangria1)) nivel = n2 && sangria > sangria2 ? 3 : 2;
+    else nivel = 1;
+    if (nivel >= 2 && !n1) nivel = 1;
+    if (nivel === 3 && !n2) nivel = 2;
+    if (nivel === 1) { n1 = agregar(raices, nombre, sinonimos); n2 = null; sangria1 = sangria; }
+    else if (nivel === 2) { n2 = agregar(n1.hijos, nombre, sinonimos); sangria2 = sangria; }
+    else agregar(n2.hijos, nombre, sinonimos);
+  }
+  const gastos = [];
+  const ingresos = [];
+  const juntar = (destino, nodos) => {
+    for (const n of nodos) juntar(agregar(destino, n.nombre, n.sinonimos).hijos, n.hijos);
+  };
+  for (const r of raices) {
+    if (claveCategoria(r.nombre) === 'ingreso') juntar(ingresos, r.hijos);
+    else juntar(gastos, [r]);
+  }
+  const conTipo = (nodos, tipo) => nodos.map((n) => ({ nombre: n.nombre, tipo, sinonimos: n.sinonimos, hijos: conTipo(n.hijos, tipo) }));
+  return { nodos: [...conTipo(gastos, 'gasto'), ...conTipo(ingresos, 'ingreso')], ignoradas };
+}
+
+/**
+ * Qué pasa si se organizan las categorías con la lista (los nodos de leerListaCategorias), sin tocar `categorias`.
+ * Nunca se duplica ni se borra nada: si ya hay una del mismo tipo con ese nombre (sin mirar mayúsculas, tildes,
+ * espacios ni la "s" final), se reutiliza y se pone en su sitio, con el nombre como está en la lista. Primero se
+ * busca por ruta completa ("Casa › Servicios"); luego solo por nombre, si ese nombre sale una sola vez en la lista
+ * (un nombre repetido en sitios distintos son categorías distintas).
+ * Los otros nombres entre paréntesis (sinonimos) juntan en esa las categorías del mismo tipo que se llamen así y
+ * que no estén ya en la lista: sus movimientos pasan a la de la lista y ellas desaparecen (única excepción al "no
+ * se borra nada": sus movimientos se conservan todos).
+ * Devuelve { filas: [{ nombre, tipo, nivel, estado: 'nueva'|'movida'|'igual', id, antes, juntadas }], categorias
+ * y movimientos (el resultado, para guardar), nuevas, movidas, iguales, fusiones: [{ id, nombre, destino, n }],
+ * movimientosCambiados, sinTocar: [las que ya había y no están en la lista] }.
+ */
+export function planOrganizar(nodos, categorias, movimientos = []) {
+  const cats = normalizarArbol(categorias);
+  const planos = [];
+  const aplanar = (lista, padre, ruta) => {
+    for (const n of lista) {
+      const i = planos.length;
+      const r = [...ruta, claveCategoria(n.nombre)];
+      planos.push({ nombre: n.nombre, tipo: n.tipo, nivel: r.length, ruta: r.join('›'), clave: r[r.length - 1], padre, sinonimos: n.sinonimos || [] });
+      aplanar(n.hijos, i, r);
+    }
+  };
+  aplanar(nodos, null, []);
+  const veces = new Map();
+  for (const p of planos) sumarUno(veces, `${p.tipo}|${p.clave}`);
+  const porRuta = new Map();
+  for (const c of cats) {
+    const k = `${c.tipo}|${rutaCategoria(cats, c.id).map((x) => claveCategoria(x.nombre)).join('›')}`;
+    if (!porRuta.has(k)) porRuta.set(k, c);
+  }
+  const usadas = new Set();
+  for (const p of planos) {
+    const c = porRuta.get(`${p.tipo}|${p.ruta}`);
+    if (c && !usadas.has(c.id)) { p.cat = c; usadas.add(c.id); }
+  }
+  for (const p of planos) {
+    if (p.cat || veces.get(`${p.tipo}|${p.clave}`) !== 1) continue;
+    const c = cats.find((x) => !usadas.has(x.id) && x.tipo === p.tipo && claveCategoria(x.nombre) === p.clave);
+    if (c) { p.cat = c; usadas.add(c.id); }
+  }
+  // Otros nombres: las que se llamen así (y no se hayan usado ya) se juntan en la de la lista.
+  const juntar = new Map(); // id de la que desaparece -> índice en planos
+  for (const [i, p] of planos.entries()) {
+    if (!p.sinonimos.length) continue;
+    const claves = clavesSinonimos(p.sinonimos);
+    for (const c of cats) {
+      if (usadas.has(c.id) || juntar.has(c.id) || c.tipo !== p.tipo || !clavesNombre(c.nombre).some((k) => claves.has(k))) continue;
+      juntar.set(c.id, i);
+    }
+  }
+  let nuevas = 0;
+  let movidas = 0;
+  let iguales = 0;
+  const filas = planos.map((p, i) => {
+    const padre = p.padre == null ? null : planos[p.padre].cat.id;
+    let estado = 'nueva';
+    let antes = null;
+    if (p.cat) {
+      estado = p.cat.padre === padre ? 'igual' : 'movida';
+      if (p.cat.nombre !== p.nombre) antes = p.cat.nombre;
+      p.cat.padre = padre;
+      p.cat.nombre = p.nombre;
+    } else {
+      p.cat = { id: nuevoId() + i.toString(36), emoji: p.nivel === 1 ? EMOJI_CATEGORIA_NUEVA : '', nombre: p.nombre, tipo: p.tipo, presupuesto: null, padre };
+    }
+    if (estado === 'nueva') nuevas++; else if (estado === 'movida') movidas++; else iguales++;
+    return { nombre: p.nombre, tipo: p.tipo, nivel: p.nivel, estado, id: p.cat.id, antes, juntadas: [] };
+  });
+  const enLista = new Set(planos.map((p) => p.cat.id));
+  let final = [...planos.map((p) => p.cat), ...cats.filter((c) => !enLista.has(c.id))];
+  let movs = movimientos;
+  let movimientosCambiados = 0;
+  const fusiones = [];
+  for (const [id, i] of juntar) {
+    const c = cats.find((x) => x.id === id);
+    const r = pasarMovimientos(final, movs, id, planos[i].cat.id);
+    final = r.categorias;
+    movs = r.movimientos;
+    movimientosCambiados += r.n;
+    fusiones.push({ id, nombre: c.nombre, destino: planos[i].cat.id, n: r.n });
+    filas[i].juntadas.push(c.nombre);
+  }
+  final = normalizarArbol(final);
+  return {
+    filas, categorias: final, movimientos: movs, nuevas, movidas, iguales, fusiones, movimientosCambiados,
+    sinTocar: final.filter((c) => !enLista.has(c.id)),
+  };
+}
+
+/**
+ * Pasa los movimientos de la categoría `origen` a `destino` y quita `origen` (sus subcategorías suben un nivel).
+ * No toca lo que recibe: devuelve { categorias, movimientos, n } con n = movimientos que cambian.
+ */
+export function pasarMovimientos(categorias, movimientos, origen, destino) {
+  if (origen === destino || !categorias.some((c) => c.id === destino)) return { categorias, movimientos, n: 0 };
+  let n = 0;
+  const movs = movimientos.map((m) => {
+    if (m.categoria !== origen) return m;
+    n++;
+    return { ...m, categoria: destino };
+  });
+  // La de destino recuerda el nombre de la que se junta, para que al traer más de Wallet vayan a ella.
+  const o = categorias.find((c) => c.id === origen);
+  const cats = quitarCategoria(categorias, origen).map((c) => (c.id === destino && o
+    ? { ...c, otrosNombres: [...new Set([...(c.otrosNombres || []), o.nombre, ...(o.otrosNombres || [])])].slice(0, 30) } : c));
+  return { categorias: cats, movimientos: movs, n };
 }

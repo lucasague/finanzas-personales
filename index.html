@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="dabdb85d48">
+  <meta name="version" content="21d45110b1">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -36,7 +36,7 @@
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.5 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.6 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -72,7 +72,7 @@
         <p class="nota-tasa" id="mov-tasa"></p>
       </div>
       <p class="error" id="mov-error" hidden></p>
-      <div class="chips" id="mov-categorias" role="radiogroup" aria-label="Categoría"></div>
+      <div id="mov-categorias" class="cat-niveles"></div>
       <div id="mov-cuenta-bloque">
         <p class="etiqueta-moneda">Cuenta</p>
         <div class="chips" id="mov-cuentas" role="radiogroup" aria-label="Cuenta"></div>
@@ -113,16 +113,54 @@
         <label><input type="radio" name="cat-tipo" value="gasto" checked><span>De gasto</span></label>
         <label><input type="radio" name="cat-tipo" value="ingreso"><span>De ingreso</span></label>
       </div>
+      <label class="campo">
+        <span>Dentro de</span>
+        <select id="cat-padre"></select>
+      </label>
       <label class="campo" id="cat-presupuesto-campo">
         <span>Presupuesto al mes (opcional)</span>
         <input id="cat-presupuesto" inputmode="decimal" autocomplete="off" placeholder="Sin presupuesto">
       </label>
+      <button type="button" class="boton-linea" data-accion="pasar-cat" hidden>Pasar sus movimientos a otra…</button>
+      <div id="cat-pasar" class="bloque-base" hidden>
+        <label class="campo">
+          <span>¿A qué categoría pasan sus movimientos? Después esta se borra.</span>
+          <select id="cat-destino"></select>
+        </label>
+        <div class="acciones">
+          <button type="button" class="boton" data-accion="pasar-cat-ok">Pasar y borrar esta</button>
+        </div>
+      </div>
       <p class="error" id="cat-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cat" id="cat-borrar" hidden>Borrar</button>
         <button type="submit" class="boton principal">Guardar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Organizar las categorías con una lista escrita -->
+  <dialog id="dlg-lista" class="hoja" aria-labelledby="dlg-lista-titulo">
+    <div class="hoja-cabecera">
+      <h2 id="dlg-lista-titulo">Organizar con una lista</h2>
+      <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="lista-paso1">
+      <p class="explica">Escribe o pega tu lista, un nombre por línea. Para meter una categoría dentro de la de arriba, ponle un guion delante (-Supermercado). Para un tercer nivel, pon espacios antes del guion o dos guiones (--Luz). Lo que pongas dentro de «Ingresos» serán categorías de ingreso. Si una que ya tienes se llama de otra forma, ponla entre paréntesis y se junta con sus movimientos: -Golosinas (Caprichos, Dulces).</p>
+      <textarea id="lista-texto" class="texto-lista" rows="12" autocomplete="off" spellcheck="false" aria-label="Tu lista de categorías"
+        placeholder="Comida&#10;-Supermercado&#10;-Restaurante&#10;&#10;Casa&#10;-Servicios&#10;    -Luz&#10;    -Agua&#10;&#10;Ingresos&#10;-Sueldo"></textarea>
+      <p class="error" id="lista-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton principal" data-accion="lista-ver">Ver cómo queda</button>
+      </div>
+    </div>
+    <div id="lista-paso2" hidden>
+      <div id="lista-resumen"></div>
+      <div class="acciones">
+        <button type="button" class="boton" data-accion="lista-cancelar">Cancelar</button>
+        <button type="button" class="boton principal" data-accion="lista-aplicar">Aplicar</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- Editar cuenta -->

@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'dabdb85d48';
+const BUILD = '21d45110b1';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -52,6 +52,10 @@ const nombreCorto = { MXN: 'pesos', CRC: 'colones', USD: 'dólares', EUR: 'euros
 const enBase = () => C.enMonedaBase(datos.movimientos, datos.moneda);
 const categoria = (id) => datos.categorias.find((c) => c.id === id)
   || { id: null, emoji: '❔', nombre: 'Sin categoría', tipo: 'gasto', presupuesto: null };
+// "Comida › Supermercado" (o "Sin categoría" si ya no existe).
+const rutaDe = (id) => C.textoRuta(datos.categorias, id) || 'Sin categoría';
+// Las subcategorías suelen no tener icono: se usa el de su categoría principal.
+const emojiDe = (c) => c.emoji || C.rutaCategoria(datos.categorias, c.id).find((x) => x.emoji)?.emoji || '🏷️';
 const cuenta = (id) => datos.cuentas.find((c) => c.id === id) || { id: null, nombre: 'Sin cuenta', tipo: null };
 const emojiCuenta = (c) => (C.TIPOS_CUENTA[c.tipo] || { emoji: '❔' }).emoji;
 
@@ -144,7 +148,7 @@ function pintarResumen() {
   } else {
     html += `<div class="tarjeta"><h2>¿En qué se va?</h2>`;
     if (!filas.length) html += `<p class="subtitulo">Este mes solo hay ingresos.</p>`;
-    html += barrasCategorias(filas);
+    html += pistaDesglose(filas) + barrasCategorias(filas);
     html += `</div>`;
   }
   const cuentas = C.netoPorCuenta(movs, mes, datos.cuentas);
@@ -165,8 +169,11 @@ function pintarResumen() {
   $('#vista-resumen').innerHTML = html;
 }
 
-/** Barras de gasto por categoría (las de gastoPorCategoria), con la nota del presupuesto si lo hay. */
-function barrasCategorias(filas) {
+/**
+ * Barras de gasto por categoría (las de gastoPorCategoria), con la nota del presupuesto si lo hay. Las que tienen
+ * subcategorías se despliegan al tocarlas y enseñan el desglose (`padre`: la de arriba, en el desglose).
+ */
+function barrasCategorias(filas, padre = null) {
   let html = '';
   for (const f of filas) {
     const pct = Math.min(100, Math.round(f.fraccion * 100));
@@ -179,20 +186,27 @@ function barrasCategorias(filas) {
         nota = `Quedan ${dinero(f.restante)} de ${dinero(f.presupuesto)}`;
       }
     }
-    html += `
-      <div class="cat-fila">
+    const conHijos = f.hijos && f.hijos.length > 0;
+    const icono = f.sinSub || (padre && !f.categoria.emoji) ? '' : `${f.categoria.emoji} `;
+    const deQue = f.presupuesto != null ? 'del presupuesto' : padre ? `de lo gastado en ${padre.nombre}` : 'del mayor gasto';
+    const cuerpo = `
         <div class="cat-linea">
-          <span class="cat-nombre">${esc(f.categoria.emoji)} ${esc(f.categoria.nombre)}</span>
+          <span class="cat-nombre">${conHijos ? '<span class="desplegar" aria-hidden="true">›</span>' : ''}${esc(icono)}${esc(f.categoria.nombre)}</span>
           <span class="cat-importe">${esc(dinero(f.gastado))}</span>
         </div>
-        <div class="barra-fondo" role="img" aria-label="${esc(f.presupuesto != null ? `${pct}% del presupuesto` : `${pct}% del mayor gasto`)}">
+        <div class="barra-fondo" role="img" aria-label="${esc(`${pct}% ${deQue}`)}">
           <div class="barra-relleno ${clase}" style="width:${pct}%"></div>
         </div>
-        ${nota ? `<div class="cat-nota ${clase === 'pasado' ? 'pasado' : ''}">${esc(nota)}</div>` : ''}
-      </div>`;
+        ${nota ? `<div class="cat-nota ${clase === 'pasado' ? 'pasado' : ''}">${esc(nota)}</div>` : ''}`;
+    html += conHijos
+      ? `<details class="cat-fila"><summary>${cuerpo}</summary><div class="desglose">${barrasCategorias(f.hijos, f.categoria)}</div></details>`
+      : `<div class="cat-fila">${cuerpo}</div>`;
   }
   return html;
 }
+
+const pistaDesglose = (filas) => (filas.some((f) => f.hijos.length)
+  ? '<p class="explica">Toca una categoría con › para ver en qué se fue por dentro.</p>' : '');
 
 function pintarMovimientos() {
   const lista = C.movimientosDelMes(datos.movimientos, mes);
@@ -215,13 +229,14 @@ function pintarMovimientos() {
     const moneda = m.moneda || datos.moneda;
     const otraMoneda = moneda !== datos.moneda;
     const enPrincipal = otraMoneda ? C.valorEn(m, datos.moneda, tasas) : null;
-    let detalle = m.nota ? c.nombre : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto');
+    const ruta = c.id ? rutaDe(c.id) : c.nombre;
+    let detalle = m.nota ? ruta : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto');
     detalle += ` · ${cuenta(m.cuenta).nombre}`;
     if (otraMoneda) detalle += enPrincipal != null ? ` · ${dinero(enPrincipal)}` : ' · sin tipo de cambio';
     html += `<li><button type="button" class="mov" data-accion="editar-mov" data-id="${esc(m.id)}">
-      <span class="emoji" aria-hidden="true">${esc(c.emoji)}</span>
+      <span class="emoji" aria-hidden="true">${esc(c.id ? emojiDe(c) : c.emoji)}</span>
       <span class="texto">
-        <span class="titulo">${esc(m.nota || c.nombre)}</span>
+        <span class="titulo">${esc(m.nota || ruta)}</span>
         <span class="detalle">${esc(detalle)}</span>
       </span>
       <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, moneda))}</span>
@@ -266,7 +281,7 @@ function pintarHistorial() {
   }
   // Los presupuestos son al mes: en el año, cada barra es relativa al mayor gasto.
   const filas = C.gastoPorCategoria(movs, C.mesesDelAño(año), datos.categorias, { conPresupuesto: false });
-  if (filas.length) html += `<div class="tarjeta"><h2>¿En qué se fue en el año?</h2>${barrasCategorias(filas)}</div>`;
+  if (filas.length) html += `<div class="tarjeta"><h2>¿En qué se fue en el año?</h2>${pistaDesglose(filas)}${barrasCategorias(filas)}</div>`;
 
   const maximo = Math.max(1, ...r.meses.map((f) => Math.max(f.ingresos, f.gastos)));
   const pct = (v) => Math.round((v / maximo) * 100);
@@ -309,12 +324,28 @@ function pintarAjustes() {
   const opcionesMes = Array.from({ length: 12 }, (_, i) => i + 1)
     .map((n) => `<option value="${n}" ${n === datos.inicioAño ? 'selected' : ''}>${esc(C.nombreMes(`2000-${String(n).padStart(2, '0')}`).slice(0, -5))}</option>`)
     .join('');
-  const grupo = (tipo) => datos.categorias.filter((c) => c.tipo === tipo).map((c) => `
-    <button type="button" class="cat-edit" data-accion="editar-cat" data-id="${esc(c.id)}">
-      <span class="emoji" aria-hidden="true">${esc(c.emoji)}</span>
-      <span class="texto">${esc(c.nombre)}${c.presupuesto ? `<br><span class="detalle">Presupuesto: ${esc(dinero(c.presupuesto))} al mes</span>` : ''}</span>
+  // En árbol: las subcategorías, con sangría debajo de la suya. Las "Sin colocar" van aparte (salvo que tengan
+  // subcategorías, que entonces se quedan en el árbol para no esconderlas).
+  const sinColocar = new Set(datos.sinColocar || []);
+  const usos = new Map();
+  for (const m of datos.movimientos) usos.set(m.categoria, (usos.get(m.categoria) || 0) + 1);
+  const botonCat = (c, nivel, detalle = '') => `
+    <button type="button" class="cat-edit nivel-${nivel}" data-accion="editar-cat" data-id="${esc(c.id)}">
+      <span class="emoji" aria-hidden="true">${esc(c.emoji || (nivel > 1 ? '·' : ''))}</span>
+      <span class="texto">${esc(c.nombre)}${c.presupuesto ? `<br><span class="detalle">Presupuesto: ${esc(dinero(c.presupuesto))} al mes</span>` : ''}${detalle}</span>
       <span class="flecha" aria-hidden="true">›</span>
-    </button>`).join('') || '<p class="subtitulo">Ninguna.</p>';
+    </button>`;
+  const suelta = (c) => sinColocar.has(c.id) && !C.hijasDe(datos.categorias, c.id).length;
+  const grupo = (tipo) => C.ordenArbol(datos.categorias, tipo)
+    .filter(({ categoria: c }) => !suelta(c))
+    .map(({ categoria: c, nivel }) => botonCat(c, nivel)).join('') || '<p class="subtitulo">Ninguna.</p>';
+  const sueltas = datos.categorias.filter(suelta);
+  const tarjetaSueltas = sueltas.length ? `
+    <div class="tarjeta sin-colocar">
+      <h2>Sin colocar (${sueltas.length})</h2>
+      <p class="explica">Venían de antes, tienen movimientos y no estaban en tu lista. Toca una para meterla dentro de otra o para pasar sus movimientos a otra. Cuando la guardes, sale de aquí.</p>
+      ${sueltas.map((c) => botonCat(c, 1, `<br><span class="detalle">${c.tipo === 'ingreso' ? 'De ingreso' : 'De gasto'} · ${esc(plural(usos.get(c.id) || 0, 'movimiento', 'movimientos'))}</span>`)).join('')}
+    </div>` : '';
   const listaCuentas = datos.cuentas.map((c) => `
     <button type="button" class="cat-edit" data-accion="editar-cuenta" data-id="${esc(c.id)}">
       <span class="emoji" aria-hidden="true">${esc(emojiCuenta(c))}</span>
@@ -339,14 +370,20 @@ function pintarAjustes() {
         <select id="inicio-anio">${opcionesMes}</select>
       </div>
     </div>
+    ${tarjetaSueltas}
     <div class="tarjeta">
       <h2>Categorías y presupuestos</h2>
-      <p class="explica">Toca una para cambiar su nombre, su icono o ponerle un presupuesto al mes.</p>
+      <p class="explica">Toca una para cambiar su nombre, su icono, dentro de cuál va o ponerle un presupuesto al mes. Las que van dentro de otra se ven debajo, un poco hacia la derecha.</p>
       <h3 class="grupo-titulo">Gastos</h3>
       ${grupo('gasto')}
       <h3 class="grupo-titulo">Ingresos</h3>
       ${grupo('ingreso')}
       <button type="button" class="boton-linea" data-accion="nueva-cat">+ Añadir categoría</button>
+    </div>
+    <div class="tarjeta">
+      <h2>Organizar con una lista</h2>
+      <p class="explica">Si ya tienes tus categorías escritas (por ejemplo, en un mensaje), pégalas y la app las crea y las ordena. Las que ya tienes con el mismo nombre se reutilizan con sus movimientos. Si una que ya tienes se llama distinto, ponla entre paréntesis detrás de la de tu lista y se junta en ella con sus movimientos, por ejemplo: -Golosinas (Caprichos). Antes de cambiar nada te enseño cómo queda. Ningún movimiento se borra.</p>
+      <button type="button" class="boton" data-accion="organizar">Organizar con una lista</button>
     </div>
     <div class="tarjeta">
       <h2>Cuentas</h2>
@@ -395,13 +432,42 @@ function tipoMov() {
   return document.querySelector('#form-mov input[name="tipo"]:checked').value;
 }
 
+let catElegida = null; // categoría elegida al apuntar (en cualquier nivel)
+
+/**
+ * Botones de categoría: primero las principales del tipo; al elegir una que tiene subcategorías, aparecen debajo
+ * (y luego las del tercer nivel). Se guarda la más concreta que esté marcada.
+ */
 function pintarChips(seleccion) {
   const tipo = tipoMov();
-  const cats = datos.categorias.filter((c) => c.tipo === tipo);
-  $('#mov-categorias').innerHTML = cats.map((c) => `
-    <button type="button" class="chip" role="radio" aria-checked="${c.id === seleccion}" data-cat="${esc(c.id)}">
-      <span aria-hidden="true">${esc(c.emoji)}</span>${esc(c.nombre)}
-    </button>`).join('');
+  const ruta = C.rutaCategoria(datos.categorias, seleccion);
+  catElegida = ruta.length && ruta[0].tipo === tipo ? seleccion : null;
+  if (!catElegida) ruta.length = 0;
+  const chip = (c, marcada) => `
+    <button type="button" class="chip" role="radio" aria-checked="${marcada}" data-cat="${esc(c.id)}">
+      ${c.emoji ? `<span aria-hidden="true">${esc(c.emoji)}</span>` : ''}${esc(c.nombre)}
+    </button>`;
+  let html = '';
+  let padre = null;
+  for (let nivel = 0; nivel < C.NIVELES_MAX; nivel++) {
+    const opciones = C.hijasDe(datos.categorias, padre).filter((c) => c.tipo === tipo);
+    if (!opciones.length) break;
+    const arriba = ruta[nivel - 1];
+    html += `<div class="chips${nivel ? ' sub' : ''}" role="radiogroup" aria-label="${esc(nivel ? `Dentro de ${arriba.nombre}` : 'Categoría')}">
+      ${nivel ? `<span class="chips-etq">Dentro de ${esc(arriba.nombre)} (si quieres):</span>` : ''}
+      ${opciones.map((c) => chip(c, c.id === ruta[nivel]?.id)).join('')}
+    </div>`;
+    if (!ruta[nivel]) break;
+    padre = ruta[nivel].id;
+  }
+  if (ruta.length > 1) html += `<p class="se-guarda">Se guarda en: ${esc(ruta.map((c) => c.nombre).join(' › '))}</p>`;
+  $('#mov-categorias').innerHTML = html;
+}
+
+/** Categoría con la que se abre el formulario: la última usada de ese tipo o la primera principal. */
+function categoriaPorDefecto(tipo) {
+  return datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
+    || datos.categorias.find((c) => c.tipo === tipo && !c.padre);
 }
 
 function pintarCuentas(seleccion) {
@@ -418,8 +484,7 @@ function cuentaSeleccionada() {
 }
 
 function catSeleccionada() {
-  const b = document.querySelector('#mov-categorias [aria-checked="true"]');
-  return b ? b.dataset.cat : null;
+  return catElegida;
 }
 
 function abrirMovimiento(id = null) {
@@ -440,9 +505,7 @@ function abrirMovimiento(id = null) {
   // Si se está viendo otro mes, la fecha por defecto cae en ese mes (día 1), no en hoy.
   const hoy = C.hoyISO();
   $('#mov-fecha').value = m ? m.fecha : (C.claveMes(hoy) === mes ? hoy : `${mes}-01`);
-  const porDefecto = datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
-    || datos.categorias.find((c) => c.tipo === tipo);
-  pintarChips(m ? m.categoria : porDefecto?.id);
+  pintarChips(m ? m.categoria : categoriaPorDefecto(tipo)?.id);
   const cuentaDef = datos.cuentas.find((c) => c.id === ultimaCuenta) || datos.cuentas[0];
   pintarCuentas(m ? m.cuenta : cuentaDef?.id);
   actualizarBase();
@@ -527,6 +590,13 @@ function tipoCat() {
   return document.querySelector('#form-cat input[name="cat-tipo"]:checked').value;
 }
 
+/** Opciones de "Dentro de": ninguna (principal) o las del mismo tipo donde cabe sin pasar de tres niveles. */
+function pintarPadres(seleccion) {
+  const opciones = C.padresPosibles(datos.categorias, editandoCat, tipoCat());
+  $('#cat-padre').innerHTML = '<option value="">Ninguna (es una categoría principal)</option>'
+    + opciones.map((f) => `<option value="${esc(f.categoria.id)}" ${f.categoria.id === seleccion ? 'selected' : ''}>${esc(C.textoRuta(datos.categorias, f.categoria.id))}</option>`).join('');
+}
+
 function abrirCategoria(id = null) {
   editandoCat = id;
   const c = id ? datos.categorias.find((x) => x.id === id) : null;
@@ -534,9 +604,12 @@ function abrirCategoria(id = null) {
   $('#cat-emoji').value = c ? c.emoji : '🏷️';
   $('#cat-nombre').value = c ? c.nombre : '';
   document.querySelector(`#form-cat input[name="cat-tipo"][value="${c ? c.tipo : 'gasto'}"]`).checked = true;
+  pintarPadres(c ? c.padre : null);
   $('#cat-presupuesto').value = c && c.presupuesto ? C.importeEditable(c.presupuesto) : '';
   $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso';
   $('#cat-borrar').hidden = !c;
+  $('#cat-pasar').hidden = true;
+  $('[data-accion="pasar-cat"]').hidden = !c || !datos.categorias.some((x) => x.tipo === c.tipo && x.id !== c.id);
   $('#cat-error').hidden = true;
   $('#dlg-cat').showModal();
   if (!c) setTimeout(() => $('#cat-nombre').focus(), 50);
@@ -553,14 +626,31 @@ function guardarCategoria() {
     presupuesto = C.parseImporte(txtPres);
     if (presupuesto == null) { err.textContent = 'El presupuesto tiene que ser un importe mayor que cero, o déjalo vacío.'; err.hidden = false; return; }
   }
-  const campos = { emoji: $('#cat-emoji').value.trim().slice(0, 8), nombre, tipo, presupuesto };
+  // "Dentro de" solo ofrece sitios válidos; se comprueba igual por si acaso (sin ciclos ni más de tres niveles).
+  const elegido = $('#cat-padre').value || null;
+  const padre = elegido && C.padresPosibles(datos.categorias, editandoCat, tipo).some((f) => f.categoria.id === elegido) ? elegido : null;
+  const campos = { emoji: $('#cat-emoji').value.trim().slice(0, 8), nombre, tipo, presupuesto, padre };
+  const antes = JSON.stringify(datos.categorias);
   if (editandoCat) {
     const c = datos.categorias.find((x) => x.id === editandoCat);
-    if (c) Object.assign(c, campos);
+    if (c) {
+      // Si cambia de gasto a ingreso (o al revés), sus subcategorías cambian con ella.
+      if (c.tipo !== tipo) {
+        const suyas = C.descendientes(datos.categorias, c.id);
+        for (const x of datos.categorias) {
+          if (x.id !== c.id && suyas.has(x.id)) Object.assign(x, { tipo, presupuesto: tipo === 'ingreso' ? null : x.presupuesto });
+        }
+      }
+      Object.assign(c, campos);
+    }
   } else {
     datos.categorias.push({ id: C.nuevoId(), ...campos });
   }
-  if (!guardar()) return;
+  datos.categorias = C.normalizarArbol(datos.categorias);
+  // Guardarla (dentro de otra o como principal) es decidir su sitio: deja de estar "Sin colocar".
+  const sinColocarAntes = datos.sinColocar;
+  if (editandoCat) quitarDeSinColocar(editandoCat);
+  if (!guardar()) { datos.categorias = JSON.parse(antes); datos.sinColocar = sinColocarAntes; return; }
   $('#dlg-cat').close();
   aviso('Categoría guardada');
   pintar();
@@ -570,18 +660,160 @@ async function borrarCategoria() {
   const id = editandoCat;
   const c = datos.categorias.find((x) => x.id === id);
   const usos = datos.movimientos.filter((m) => m.categoria === id).length;
+  const hijas = C.hijasDe(datos.categorias, id);
+  const arriba = c && c.padre ? datos.categorias.find((x) => x.id === c.padre) : null;
   $('#dlg-cat').close();
-  const ok = await confirmar({
-    titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
-    texto: usos
-      ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: pasarán a «Sin categoría».`
-      : 'No tiene movimientos.',
-    si: 'Borrar',
-  });
+  let texto = usos
+    ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: pasarán a «Sin categoría».`
+    : 'No tiene movimientos.';
+  if (hijas.length) {
+    texto += ` Sus ${hijas.length === 1 ? 'subcategoría' : `${hijas.length} subcategorías`} no se borra${hijas.length === 1 ? '' : 'n'}: `
+      + (arriba ? `pasa${hijas.length === 1 ? '' : 'n'} a estar dentro de «${arriba.nombre}».` : `pasa${hijas.length === 1 ? '' : 'n'} a ser principal${hijas.length === 1 ? '' : 'es'}.`);
+  }
+  const ok = await confirmar({ titulo: `¿Borrar «${c ? c.nombre : ''}»?`, texto, si: 'Borrar' });
   if (!ok) { abrirCategoria(id); return; }
-  datos.categorias = datos.categorias.filter((x) => x.id !== id);
+  datos.categorias = C.normalizarArbol(C.quitarCategoria(datos.categorias, id));
+  olvidarCategoriasQuitadas();
   guardar();
   aviso('Categoría borrada');
+  pintar();
+}
+
+/** "Pasar sus movimientos a otra…": enseña a cuál (las del mismo tipo, menos ella). */
+function mostrarPasar() {
+  const c = datos.categorias.find((x) => x.id === editandoCat);
+  if (!c) return;
+  const opciones = C.ordenArbol(datos.categorias, c.tipo).filter((f) => f.categoria.id !== c.id);
+  $('#cat-destino').innerHTML = '<option value="">Elige una…</option>'
+    + opciones.map((f) => `<option value="${esc(f.categoria.id)}">${esc(C.textoRuta(datos.categorias, f.categoria.id))}</option>`).join('');
+  $('#cat-pasar').hidden = false;
+  $('[data-accion="pasar-cat"]').hidden = true;
+  $('#cat-destino').focus();
+}
+
+async function pasarCategoria() {
+  const id = editandoCat;
+  const c = datos.categorias.find((x) => x.id === id);
+  const destino = $('#cat-destino').value;
+  const err = $('#cat-error');
+  if (!c) return;
+  if (!destino) { err.textContent = 'Elige a qué categoría pasan sus movimientos.'; err.hidden = false; return; }
+  const usos = datos.movimientos.filter((m) => m.categoria === id).length;
+  const hijas = C.hijasDe(datos.categorias, id).length;
+  $('#dlg-cat').close();
+  const ok = await confirmar({
+    titulo: `¿Pasar ${plural(usos, 'movimiento', 'movimientos')} a «${rutaDe(destino)}»?`,
+    texto: `Después se borra «${c.nombre}».${hijas ? ` Sus subcategorías no se borran: suben un nivel.` : ''}`,
+    si: 'Pasar y borrar',
+    peligro: false,
+  });
+  if (!ok) { abrirCategoria(id); return; }
+  const antes = { categorias: datos.categorias, movimientos: datos.movimientos, sinColocar: datos.sinColocar };
+  const r = C.pasarMovimientos(datos.categorias, datos.movimientos, id, destino);
+  datos.categorias = C.normalizarArbol(r.categorias);
+  datos.movimientos = r.movimientos;
+  olvidarCategoriasQuitadas();
+  if (!guardar()) { Object.assign(datos, antes); return; }
+  aviso(`${plural(r.n, 'movimiento pasado', 'movimientos pasados')} a «${rutaDe(destino)}»`);
+  pintar();
+}
+
+/** Tras quitar categorías: que "la última usada" y "Sin colocar" no apunten a ninguna que ya no existe. */
+function olvidarCategoriasQuitadas() {
+  const ids = new Set(datos.categorias.map((c) => c.id));
+  for (const t of ['gasto', 'ingreso']) if (!ids.has(ultimaCategoria[t])) ultimaCategoria[t] = null;
+  datos.sinColocar = (datos.sinColocar || []).filter((id) => ids.has(id));
+}
+
+const quitarDeSinColocar = (id) => { datos.sinColocar = (datos.sinColocar || []).filter((x) => x !== id); };
+
+// ---------- Organizar con una lista ----------
+
+let planLista = null; // lo que se va a hacer, calculado en "Ver cómo queda"
+
+function abrirLista() {
+  planLista = null;
+  $('#lista-paso1').hidden = false;
+  $('#lista-paso2').hidden = true;
+  $('#lista-error').hidden = true;
+  $('#dlg-lista').showModal();
+  setTimeout(() => $('#lista-texto').focus(), 50);
+}
+
+function verLista() {
+  const { nodos, ignoradas } = C.leerListaCategorias($('#lista-texto').value);
+  const err = $('#lista-error');
+  if (!nodos.length) {
+    err.textContent = 'No encuentro ningún nombre en la lista. Escribe una categoría por línea.';
+    err.hidden = false;
+    return;
+  }
+  err.hidden = true;
+  const p = C.planOrganizar(nodos, datos.categorias, datos.movimientos);
+  planLista = p;
+  const usos = new Map();
+  for (const m of datos.movimientos) usos.set(m.categoria, (usos.get(m.categoria) || 0) + 1);
+  const cambios = [];
+  if (p.nuevas) cambios.push(`${plural(p.nuevas, 'categoría nueva', 'categorías nuevas')}.`);
+  if (p.movidas) cambios.push(`${p.movidas} que ya tenías ${p.movidas === 1 ? 'se coloca' : 'se colocan'} en su sitio, con sus movimientos.`);
+  if (p.iguales) cambios.push(`${p.iguales} que ya tenías ${p.iguales === 1 ? 'ya estaba' : 'ya estaban'} bien.`);
+  if (p.fusiones.length) {
+    const destino = (id) => p.filas.find((f) => f.id === id)?.nombre || '';
+    cambios.push(`${p.fusiones.length} que ya tenías ${p.fusiones.length === 1 ? 'se junta' : 'se juntan'} en otra (por los nombres entre paréntesis): ${plural(p.movimientosCambiados, 'movimiento cambia', 'movimientos cambian')} de categoría.
+      <details><summary>Ver cuáles</summary>${p.fusiones.map((f) => `${esc(f.nombre)} → ${esc(destino(f.destino))} (${plural(f.n, 'movimiento', 'movimientos')})`).join('<br>')}</details>`);
+  }
+  if (p.sinTocar.length) {
+    const conMovs = p.sinTocar.filter((c) => usos.get(c.id)).length;
+    cambios.push(`${p.sinTocar.length} que ya tenías no ${p.sinTocar.length === 1 ? 'está' : 'están'} en la lista: ${p.sinTocar.length === 1 ? 'se queda' : 'se quedan'} como ${p.sinTocar.length === 1 ? 'está' : 'están'}.${conMovs ? ` Las ${conMovs} que tienen movimientos te las enseño en Ajustes como «Sin colocar».` : ''}
+      <details><summary>Ver cuáles</summary>${p.sinTocar.map((c) => esc(C.textoRuta(p.categorias, c.id))).join(', ')}</details>`);
+  }
+  if (ignoradas.length) {
+    cambios.push(`${plural(ignoradas.length, 'línea no se usa', 'líneas no se usan')}: ${ignoradas.length === 1 ? 'es demasiado larga' : 'son demasiado largas'} para ser un nombre.
+      <details><summary>Ver cuáles</summary>${ignoradas.map(esc).join('<br>')}</details>`);
+  }
+  cambios.push(p.fusiones.length
+    ? 'No se borra ningún movimiento. Solo desaparecen las categorías que se juntan en otra.'
+    : 'No se borra ninguna categoría ni ningún movimiento.');
+  const etiqueta = (f) => {
+    const junta = f.juntadas.length ? ` · junta ${f.juntadas.map((n) => `«${esc(n)}»`).join(', ')}` : '';
+    if (f.estado === 'nueva') return `<span class="etq nueva">nueva${junta}</span>`;
+    const n = usos.get(f.id) || 0;
+    const como = f.antes ? ` (era «${esc(f.antes)}»)` : '';
+    return `<span class="etq">ya la tenías${como}${n ? ` · ${plural(n, 'movimiento', 'movimientos')}` : ''}${junta}</span>`;
+  };
+  const arbol = (tipo) => p.filas.filter((f) => f.tipo === tipo)
+    .map((f) => `<li class="nivel-${f.nivel}"><span>${esc(f.nombre)}</span>${etiqueta(f)}</li>`).join('');
+  const gastos = arbol('gasto');
+  const ingresos = arbol('ingreso');
+  $('#lista-resumen').innerHTML = `
+    <p class="explica">Así quedará. Revísalo y dale a <strong>Aplicar</strong>.</p>
+    <ul class="lista-cambios">${cambios.map((c) => `<li>${c}</li>`).join('')}</ul>
+    ${gastos ? `<h3 class="grupo-titulo">Gastos</h3><ul class="arbol">${gastos}</ul>` : ''}
+    ${ingresos ? `<h3 class="grupo-titulo">Ingresos</h3><ul class="arbol">${ingresos}</ul>` : ''}`;
+  $('#lista-paso1').hidden = true;
+  $('#lista-paso2').hidden = false;
+  $('#dlg-lista').scrollTop = 0;
+}
+
+function cancelarLista() {
+  planLista = null;
+  $('#lista-paso2').hidden = true;
+  $('#lista-paso1').hidden = false;
+}
+
+function aplicarLista() {
+  if (!planLista) return;
+  const antes = { categorias: datos.categorias, movimientos: datos.movimientos, sinColocar: datos.sinColocar };
+  const conMovs = new Set(planLista.movimientos.map((m) => m.categoria));
+  datos.categorias = planLista.categorias;
+  datos.movimientos = planLista.movimientos;
+  // Las que no están en la lista y tienen movimientos: se marcan para que sepa cuáles le falta colocar.
+  datos.sinColocar = planLista.sinTocar.filter((c) => conMovs.has(c.id)).map((c) => c.id);
+  if (!guardar()) { Object.assign(datos, antes); return; }
+  olvidarCategoriasQuitadas();
+  planLista = null;
+  $('#dlg-lista').close();
+  aviso('Categorías organizadas');
   pintar();
 }
 
@@ -761,10 +993,7 @@ document.addEventListener('click', (e) => {
   if (nav) { vista = nav.dataset.vista; pintar(); window.scrollTo(0, 0); return; }
 
   const chip = e.target.closest('#mov-categorias .chip');
-  if (chip) {
-    for (const b of document.querySelectorAll('#mov-categorias .chip')) b.setAttribute('aria-checked', String(b === chip));
-    return;
-  }
+  if (chip) { pintarChips(chip.dataset.cat); return; }
   const chipCuenta = e.target.closest('#mov-cuentas .chip');
   if (chipCuenta) {
     for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(b === chipCuenta));
@@ -780,6 +1009,12 @@ document.addEventListener('click', (e) => {
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
     case 'nueva-cat': abrirCategoria(); break;
     case 'borrar-cat': borrarCategoria(); break;
+    case 'pasar-cat': mostrarPasar(); break;
+    case 'pasar-cat-ok': pasarCategoria(); break;
+    case 'organizar': abrirLista(); break;
+    case 'lista-ver': verLista(); break;
+    case 'lista-cancelar': cancelarLista(); break;
+    case 'lista-aplicar': aplicarLista(); break;
     case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
@@ -802,10 +1037,7 @@ $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCa
 $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
-    const tipo = tipoMov();
-    const def = datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
-      || datos.categorias.find((c) => c.tipo === tipo);
-    pintarChips(def?.id);
+    pintarChips(categoriaPorDefecto(tipoMov())?.id);
     actualizarBase();
   });
 }
@@ -814,7 +1046,10 @@ $('#mov-importe').addEventListener('input', actualizarBase);
 $('#mov-fecha').addEventListener('change', actualizarBase);
 $('#mov-importe-base').addEventListener('input', () => { baseTocada = $('#mov-importe-base').value.trim() !== ''; actualizarBase(); });
 for (const r of document.querySelectorAll('#form-cat input[name="cat-tipo"]')) {
-  r.addEventListener('change', () => { $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso'; });
+  r.addEventListener('change', () => {
+    $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso';
+    pintarPadres($('#cat-padre').value);
+  });
 }
 $('#archivo-importar').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importar(f); });
 $('#archivo-wallet').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) traerWallet(f); });
