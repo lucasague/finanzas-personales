@@ -35,7 +35,7 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 5;
+export const VERSION_DATOS = 6;
 export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
@@ -47,6 +47,7 @@ export function datosIniciales() {
     cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
     sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
+    esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
   };
 }
 
@@ -358,6 +359,8 @@ export function validarCopia(obj) {
       datos: {
         version: VERSION_DATOS, moneda, inicioAño, categorias: normalizarArbol(categorias), cuentas, movimientos,
         sinColocar: Array.isArray(obj.sinColocar) ? [...new Set(obj.sinColocar.filter((x) => ids.has(x)))] : [],
+        // Hasta la versión 5 no había ingreso esperado.
+        esperados: validarEsperados(obj.esperados),
       },
       descartados,
     };
@@ -534,6 +537,109 @@ export function textoTipoDeCambio(moneda, base, valor) {
   const num = (v) => new Intl.NumberFormat('es-MX', { maximumFractionDigits: v >= 100 ? 1 : v >= 10 ? 2 : 4 }).format(v);
   if (valor >= 1) return `1 ${moneda} = ${num(valor)} ${base}`;
   return `1 ${base} = ${num(1 / valor)} ${moneda}`;
+}
+
+// ---------- Ingreso esperado ----------
+// Cada ingreso que se espera al mes (el sueldo, una renta...) es una línea con nombre, importe y moneda. Para que
+// cambiar el importe no reescriba los meses pasados, cada línea se guarda por tramos: { id, grupo, nombre,
+// importe, moneda, desde, hasta } (meses "AAAA-MM"; hasta null = sigue). Los tramos de una misma línea comparten
+// `grupo` y no se solapan.
+
+const esClaveMes = (s) => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+
+function validarEsperados(lista) {
+  if (!Array.isArray(lista)) return [];
+  const res = [];
+  for (const e of lista) {
+    if (!e || !Number.isInteger(e.importe) || e.importe <= 0 || !esClaveMes(e.desde)) continue;
+    const hasta = esClaveMes(e.hasta) && e.hasta >= e.desde ? e.hasta : null;
+    res.push({
+      id: typeof e.id === 'string' && e.id ? e.id : nuevoId(),
+      grupo: typeof e.grupo === 'string' && e.grupo ? e.grupo : (typeof e.id === 'string' && e.id ? e.id : nuevoId()),
+      nombre: typeof e.nombre === 'string' && e.nombre.trim() ? e.nombre.trim().slice(0, 40) : 'Ingreso',
+      importe: e.importe,
+      moneda: MONEDAS[e.moneda] ? e.moneda : 'MXN',
+      desde: e.desde,
+      hasta,
+    });
+  }
+  return res;
+}
+
+const cubre = (e, clave) => e.desde <= clave && (!e.hasta || clave <= e.hasta);
+
+/** Los tramos que cuentan en ese mes. */
+export function esperadosDelMes(esperados, clave) {
+  return (esperados || []).filter((e) => cubre(e, clave));
+}
+
+/**
+ * Las líneas para ver y editar en Ajustes: por cada grupo, el tramo que cubre `hoy` o, si no, el siguiente que
+ * empieza (los que ya terminaron no salen).
+ */
+export function lineasEsperadas(esperados, hoy) {
+  const porGrupo = new Map();
+  for (const e of esperados || []) {
+    if (e.hasta && e.hasta < hoy) continue;
+    const otro = porGrupo.get(e.grupo);
+    if (!otro || (cubre(e, hoy) && !cubre(otro, hoy)) || (!cubre(otro, hoy) && e.desde < otro.desde)) porGrupo.set(e.grupo, e);
+  }
+  return [...porGrupo.values()].sort((a, b) => a.desde.localeCompare(b.desde) || a.nombre.localeCompare(b.nombre));
+}
+
+/**
+ * Pone una línea con { nombre, importe, moneda } a partir del mes `desde`. Si `grupo` ya existe, lo de antes de
+ * `desde` se queda como estaba (para no cambiar la comparación de los meses pasados) y lo de después se sustituye.
+ * Devuelve la lista nueva.
+ */
+export function ponerEsperado(esperados, grupo, campos, desde) {
+  const g = grupo || nuevoId();
+  const res = quitarEsperado(esperados, g, desde);
+  res.push({ id: nuevoId(), grupo: g, nombre: campos.nombre, importe: campos.importe, moneda: campos.moneda, desde, hasta: null });
+  return res;
+}
+
+/** Deja de contar una línea a partir de `desde` (los meses anteriores la siguen teniendo). */
+export function quitarEsperado(esperados, grupo, desde) {
+  const res = [];
+  for (const e of esperados || []) {
+    if (e.grupo !== grupo) { res.push(e); continue; }
+    if (e.desde >= desde) continue; // empieza en o después del corte: fuera
+    const hasta = moverMes(desde, -1);
+    res.push(e.hasta && e.hasta <= hasta ? e : { ...e, hasta });
+  }
+  return res;
+}
+
+/**
+ * Ingreso esperado de un mes en la moneda principal: { total, porMoneda, lineas, sinTasa }. Lo esperado en otra
+ * moneda se pasa con el tipo de cambio de ese mes (o el más cercano que se conozca); si no hay ninguno, esa línea
+ * cuenta en sinTasa y no suma.
+ */
+export function esperadoDelMes(esperados, clave, base, tasas) {
+  const r = { total: 0, porMoneda: {}, lineas: [], sinTasa: 0 };
+  for (const e of esperadosDelMes(esperados, clave)) {
+    const t = tasa(tasas, e.moneda, base, clave);
+    const enBase = t == null ? null : Math.round(e.importe * t);
+    r.lineas.push({ ...e, enBase });
+    r.porMoneda[e.moneda] = (r.porMoneda[e.moneda] || 0) + e.importe;
+    if (enBase == null) r.sinTasa++;
+    else r.total += enBase;
+  }
+  return r;
+}
+
+/**
+ * Esperado frente a real de cada mes del año que empieza en `desde`: [{ clave, esperado, real, diferencia,
+ * sinTasa, hayEsperado }], y los totales del año contando solo los meses que tienen algo esperado. Recibe los
+ * movimientos ya pasados por enMonedaBase.
+ */
+export function esperadoVsReal(movs, esperados, desde, base, tasas) {
+  const meses = totalesPorMes(movs, mesesDelAño(desde)).map((f) => {
+    const e = esperadoDelMes(esperados, f.clave, base, tasas);
+    return { clave: f.clave, esperado: e.total, real: f.ingresos, diferencia: f.ingresos - e.total, sinTasa: e.sinTasa, hayEsperado: e.lineas.length > 0 };
+  });
+  return { meses, hayAlguno: meses.some((f) => f.hayEsperado) };
 }
 
 // ---------- Traer datos de Wallet (BudgetBakers) ----------

@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="21d45110b1">
+  <meta name="version" content="4be27768ec">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -182,6 +182,36 @@
       <p class="error" id="cuenta-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cuenta" id="cuenta-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ingreso esperado -->
+  <dialog id="dlg-esperado" class="hoja" aria-labelledby="dlg-esperado-titulo">
+    <form method="dialog" id="form-esperado" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-esperado-titulo">Ingreso esperado</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <label class="campo">
+        <span>Qué es (por ejemplo, Sueldo)</span>
+        <input id="esp-nombre" maxlength="40" autocomplete="off" required>
+      </label>
+      <p class="etiqueta-moneda">En qué moneda lo recibes</p>
+      <div class="segmentado monedas" id="esp-moneda" role="radiogroup" aria-label="Moneda"></div>
+      <label class="campo">
+        <span>Cuánto esperas al mes</span>
+        <input id="esp-importe" inputmode="decimal" autocomplete="off" placeholder="0">
+      </label>
+      <label class="campo">
+        <span id="esp-desde-etiqueta">Desde</span>
+        <select id="esp-desde"></select>
+      </label>
+      <p class="explica" id="esp-explica"></p>
+      <p class="error" id="esp-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-esperado" id="esp-borrar" hidden>Ya no lo espero</button>
         <button type="submit" class="boton principal">Guardar</button>
       </div>
     </form>

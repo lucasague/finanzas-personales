@@ -343,3 +343,16 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 }
 .aviso[hidden] { display: none; }
 .aviso + .cabecera { padding-top: 10px; }
+
+/* Ingreso esperado frente a real */
+.nota-esperado { font-size: .85rem; margin: 6px 0 10px; color: var(--ingreso); }
+.nota-esperado.falta { color: var(--gasto); }
+.tabla-esperado { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.tabla-esperado th { font-weight: 600; font-size: .78rem; color: var(--texto-suave); text-align: right; padding: 0 0 6px; }
+.tabla-esperado td { text-align: right; padding: 5px 0 5px 6px; border-top: 1px solid var(--borde); white-space: nowrap; }
+.tabla-esperado td:first-child { text-align: left; font-weight: 600; padding-left: 0; }
+.tabla-esperado tr.vacia td, .tabla-esperado tr.futuro td { color: var(--texto-suave); font-weight: 500; }
+.tabla-esperado tfoot td { font-weight: 700; border-top: 2px solid var(--borde); }
+.tabla-esperado .gasto { color: var(--gasto); }
+.tabla-esperado .ingreso { color: var(--ingreso); }
+.totales + .barra-fondo { margin-top: 12px; }

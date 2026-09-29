@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '21d45110b1';
+const BUILD = '4be27768ec';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -11,6 +11,7 @@ let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
 let editandoCuenta = null; // id de la cuenta en edición, o null si es nueva
+let editandoEsperado = null; // grupo del ingreso esperado en edición, o null si es nuevo
 let ultimaCategoria = { gasto: null, ingreso: null };
 let ultimaMoneda = null;
 let ultimaCuenta = null;
@@ -124,7 +125,7 @@ function pintar() {
 }
 
 function pintarResumen() {
-  const { movs, sinConvertir } = enBase();
+  const { movs, sinConvertir, tasas } = enBase();
   const r = C.resumenMes(movs, mes);
   const filas = C.gastoPorCategoria(movs, mes, datos.categorias);
   const hayMovs = datos.movimientos.some((m) => C.claveMes(m.fecha) === mes);
@@ -141,6 +142,7 @@ function pintarResumen() {
   if (sinConvertir) {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no entra${sinConvertir === 1 ? '' : 'n'} en los totales porque falta su tipo de cambio.</p>`;
   }
+  html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas), r.ingresos);
 
   if (!hayMovs && !filas.length) {
     html += `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🌱</span>
@@ -167,6 +169,29 @@ function pintarResumen() {
     html += `</div>`;
   }
   $('#vista-resumen').innerHTML = html;
+}
+
+/** Esperado frente a real del mes, en el Resumen. Nada si no hay ingreso esperado ese mes. */
+function tarjetaEsperado(e, real) {
+  if (!e.lineas.length) return '';
+  const hoy = C.claveMes(C.hoyISO());
+  const dif = real - e.total;
+  const pct = e.total ? Math.min(100, Math.round((real / e.total) * 100)) : 100;
+  const nota = dif >= 0
+    ? (dif ? `${dinero(dif)} más de lo esperado` : 'Justo lo esperado')
+    : (mes > hoy ? 'Este mes aún no ha llegado' : `Faltan ${dinero(-dif)} para lo esperado`);
+  const lineas = e.lineas.map((l) => `${l.nombre}: ${C.formatoMoneda(l.importe, l.moneda)}${l.moneda !== datos.moneda && l.enBase != null ? ` (≈ ${dinero(l.enBase)})` : ''}`);
+  return `
+    <div class="tarjeta">
+      <h2>Ingreso esperado</h2>
+      <div class="totales">
+        <div><span class="t-etq">Esperado</span><span class="t-val">${esc(dinero(e.total))}</span></div>
+        <div><span class="t-etq">Real</span><span class="t-val ingreso">${esc(dinero(real))}</span></div>
+      </div>
+      <div class="barra-fondo"><div class="barra-relleno ing" style="width:${pct}%"></div></div>
+      <p class="nota-esperado ${dif < 0 && mes <= hoy ? 'falta' : ''}">${esc(nota)}</p>
+      <p class="explica">${lineas.map(esc).join('<br>')}${e.sinTasa ? '<br>Hay algo en otra moneda que no suma porque aún no sé su tipo de cambio.' : ''}</p>
+    </div>`;
 }
 
 /**
@@ -302,6 +327,7 @@ function pintarHistorial() {
       </div>`;
   }
   html += `</div>`;
+  html += tablaEsperado(movs, tasas, hoy);
   const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, C.moverMes(año, 11), 12);
   if (tipos.length) {
     html += `<div class="tarjeta"><h2>Tipo de cambio de cada mes</h2>
@@ -315,6 +341,40 @@ function pintarHistorial() {
     html += `</div>`;
   }
   $('#vista-historial').innerHTML = html;
+}
+
+/** Esperado frente a real de cada mes del año, en el Historial. */
+function tablaEsperado(movs, tasas, hoy) {
+  const r = C.esperadoVsReal(movs, datos.esperados, año, datos.moneda, tasas);
+  if (!r.hayAlguno) {
+    return `<div class="tarjeta"><h2>Esperado y real</h2>
+      <p class="explica">Pon cuánto esperas ingresar al mes y aquí lo verás junto a lo que de verdad entró, mes a mes.</p>
+      <button type="button" class="boton-linea" data-accion="nuevo-esperado">+ Poner ingreso esperado</button></div>`;
+  }
+  const mesCorto = (k) => `${esc(C.nombreMes(k).slice(0, 3))} ${esc(k.slice(2, 4))}`;
+  const conSigno = (v) => `<span class="${v < 0 ? 'gasto' : 'ingreso'}">${v < 0 ? '−' : '+'}${esc(dinero(Math.abs(v)))}</span>`;
+  let filas = '';
+  let tEsp = 0;
+  let tReal = 0;
+  for (const f of r.meses) {
+    if (!f.hayEsperado) {
+      filas += `<tr class="vacia"><td>${mesCorto(f.clave)}</td><td>—</td><td>${f.real ? esc(dinero(f.real)) : '—'}</td><td></td></tr>`;
+      continue;
+    }
+    const futuro = f.clave > hoy;
+    if (!futuro) { tEsp += f.esperado; tReal += f.real; }
+    filas += `<tr class="${futuro ? 'futuro' : ''}"><td>${mesCorto(f.clave)}</td><td>${esc(dinero(f.esperado))}${f.sinTasa ? '*' : ''}</td><td>${futuro ? '' : esc(dinero(f.real))}</td><td>${futuro ? '' : conSigno(f.diferencia)}</td></tr>`;
+  }
+  const hayTasa = r.meses.some((f) => f.sinTasa);
+  return `<div class="tarjeta"><h2>Esperado y real</h2>
+    <p class="explica">Lo que esperabas ingresar cada mes y lo que de verdad entró. Los meses que aún no han llegado solo muestran lo esperado.</p>
+    <table class="tabla-esperado">
+      <thead><tr><th></th><th>Esperado</th><th>Real</th><th>Diferencia</th></tr></thead>
+      <tbody>${filas}</tbody>
+      <tfoot><tr><td>Total</td><td>${esc(dinero(tEsp))}</td><td>${esc(dinero(tReal))}</td><td>${conSigno(tReal - tEsp)}</td></tr></tfoot>
+    </table>
+    <p class="explica">El total cuenta solo los meses que ya pasaron o están en curso y tienen algo esperado.${hayTasa ? ' * Hay algo esperado en otra moneda que no suma porque aún no sé su tipo de cambio.' : ''}</p>
+  </div>`;
 }
 
 function pintarAjustes() {
@@ -352,6 +412,13 @@ function pintarAjustes() {
       <span class="texto">${esc(c.nombre)}<br><span class="detalle">${esc(C.TIPOS_CUENTA[c.tipo].nombre)}</span></span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`).join('') || '<p class="subtitulo">Ninguna.</p>';
+  const hoy = C.claveMes(C.hoyISO());
+  const listaEsperados = C.lineasEsperadas(datos.esperados, hoy).map((e) => `
+    <button type="button" class="cat-edit" data-accion="editar-esperado" data-id="${esc(e.grupo)}">
+      <span class="emoji" aria-hidden="true">📥</span>
+      <span class="texto">${esc(e.nombre)}<br><span class="detalle">${esc(C.formatoMoneda(e.importe, e.moneda))} al mes${e.desde > hoy ? ` · desde ${esc(C.nombreMes(e.desde).toLowerCase())}` : ''}</span></span>
+      <span class="flecha" aria-hidden="true">›</span>
+    </button>`).join('') || '<p class="subtitulo">Ninguno todavía.</p>';
 
   $('#vista-ajustes').innerHTML = `
     <div class="tarjeta">
@@ -369,6 +436,12 @@ function pintarAjustes() {
         <label for="inicio-anio">El año empieza en</label>
         <select id="inicio-anio">${opcionesMes}</select>
       </div>
+    </div>
+    <div class="tarjeta">
+      <h2>Ingreso esperado al mes</h2>
+      <p class="explica">Lo que cuentas con recibir cada mes (el sueldo, una renta…). En el Resumen y en el Historial lo verás junto a lo que de verdad entró. Si algo cambia, lo cambias desde el mes que toque y los meses de antes se quedan como estaban.</p>
+      ${listaEsperados}
+      <button type="button" class="boton-linea" data-accion="nuevo-esperado">+ Añadir ingreso esperado</button>
     </div>
     ${tarjetaSueltas}
     <div class="tarjeta">
@@ -869,6 +942,67 @@ async function borrarCuenta() {
   pintar();
 }
 
+// ---------- Ingreso esperado ----------
+
+function abrirEsperado(grupo = null) {
+  editandoEsperado = grupo;
+  const hoy = C.claveMes(C.hoyISO());
+  const e = grupo ? C.lineasEsperadas(datos.esperados, hoy).find((x) => x.grupo === grupo) : null;
+  $('#dlg-esperado-titulo').textContent = e ? 'Cambiar ingreso esperado' : 'Nuevo ingreso esperado';
+  $('#esp-nombre').value = e ? e.nombre : '';
+  $('#esp-importe').value = e ? C.importeEditable(e.importe) : '';
+  const moneda = e ? e.moneda : datos.moneda;
+  $('#esp-moneda').innerHTML = Object.keys(C.MONEDAS)
+    .map((cod) => `<label><input type="radio" name="esp-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
+  // Desde dos años atrás (para compararlo con lo ya apuntado) hasta un año adelante. Nuevo: desde que empezó
+  // este año (septiembre), para ver ya cómo va.
+  const desde = e ? (e.desde > hoy ? e.desde : hoy) : añoDeHoy();
+  const opciones = [];
+  for (let i = -24; i <= 12; i++) opciones.push(C.moverMes(hoy, i));
+  if (!opciones.includes(desde)) opciones.push(desde);
+  opciones.sort();
+  $('#esp-desde').innerHTML = opciones.map((k) => `<option value="${k}" ${k === desde ? 'selected' : ''}>${esc(C.nombreMes(k))}</option>`).join('');
+  $('#esp-desde-etiqueta').textContent = e ? 'El cambio vale desde' : 'Lo esperas desde';
+  $('#esp-explica').textContent = e
+    ? 'Los meses de antes se quedan con lo que tenían.'
+    : 'Si eliges un mes pasado, verás también cómo te fue esos meses.';
+  $('#esp-borrar').hidden = !e;
+  $('#esp-error').hidden = true;
+  $('#dlg-esperado').showModal();
+  if (!e) setTimeout(() => $('#esp-nombre').focus(), 50);
+}
+
+function guardarEsperado() {
+  const err = $('#esp-error');
+  const nombre = $('#esp-nombre').value.trim().slice(0, 40);
+  if (!nombre) { err.textContent = 'Ponle un nombre, por ejemplo Sueldo.'; err.hidden = false; return; }
+  const importe = C.parseImporte($('#esp-importe').value);
+  if (importe == null) { err.textContent = 'Pon cuánto esperas al mes.'; err.hidden = false; return; }
+  const moneda = document.querySelector('#esp-moneda input:checked')?.value || datos.moneda;
+  datos.esperados = C.ponerEsperado(datos.esperados, editandoEsperado, { nombre, importe, moneda }, $('#esp-desde').value);
+  if (!guardar()) return;
+  $('#dlg-esperado').close();
+  aviso('Ingreso esperado guardado');
+  pintar();
+}
+
+async function borrarEsperado() {
+  const grupo = editandoEsperado;
+  const hoy = C.claveMes(C.hoyISO());
+  const e = C.lineasEsperadas(datos.esperados, hoy).find((x) => x.grupo === grupo);
+  $('#dlg-esperado').close();
+  const ok = await confirmar({
+    titulo: `¿Dejar de esperar «${e ? e.nombre : ''}»?`,
+    texto: 'Deja de contar desde este mes. En los meses de antes se sigue viendo lo que esperabas.',
+    si: 'Sí, ya no lo espero',
+  });
+  if (!ok) { abrirEsperado(grupo); return; }
+  datos.esperados = C.quitarEsperado(datos.esperados, grupo, hoy);
+  guardar();
+  aviso('Hecho');
+  pintar();
+}
+
 // ---------- Copia de seguridad ----------
 
 async function exportar() {
@@ -1018,6 +1152,9 @@ document.addEventListener('click', (e) => {
     case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
+    case 'editar-esperado': abrirEsperado(el.dataset.id); break;
+    case 'nuevo-esperado': abrirEsperado(); break;
+    case 'borrar-esperado': borrarEsperado(); break;
     case 'cerrar': el.closest('dialog').close(); break;
     // En el Historial las flechas mueven de año en año.
     case 'mes-anterior': if (vista === 'historial') año = C.moverMes(año, -12); else mes = C.moverMes(mes, -1); pintar(); break;
@@ -1035,6 +1172,7 @@ document.addEventListener('click', (e) => {
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });
 $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
+$('#form-esperado').addEventListener('submit', (e) => { e.preventDefault(); guardarEsperado(); });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
     pintarChips(categoriaPorDefecto(tipoMov())?.id);
