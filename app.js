@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'dcc65de369';
+const BUILD = 'c190937f33';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -287,7 +287,8 @@ function pintarHistorial() {
     $('#vista-historial').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📈</span>
       ${datos.movimientos.length
         ? `No hay nada apuntado en ${esc(C.nombreAño(año))}.<br>Usa las flechas de arriba para ver otro año.`
-        : 'Cuando apuntes movimientos, aquí verás tus ingresos y gastos del año, mes a mes.'}</div>`;
+        : 'Cuando apuntes movimientos, aquí verás tus ingresos y gastos del año, mes a mes.'}</div>`
+      + (datos.esperados.length ? tablaEsperado(movs, tasas, hoy) : '');
     return;
   }
   const desgloseAño = desgloseMonedas(r.ingresosPorMoneda);
@@ -416,7 +417,7 @@ function pintarAjustes() {
   const listaEsperados = C.lineasEsperadas(datos.esperados, hoy).map((e) => `
     <button type="button" class="cat-edit" data-accion="editar-esperado" data-id="${esc(e.grupo)}">
       <span class="emoji" aria-hidden="true">📥</span>
-      <span class="texto">${esc(e.nombre)}<br><span class="detalle">${esc(C.formatoMoneda(e.importe, e.moneda))} al mes${e.desde > hoy ? ` · desde ${esc(C.nombreMes(e.desde).toLowerCase())}` : ''}</span></span>
+      <span class="texto">${esc(e.nombre)}<br><span class="detalle">${e.importe ? `${esc(C.formatoMoneda(e.importe, e.moneda))} al mes` : `En ${esc(e.moneda)}, cada mes distinto`}${e.desde > hoy ? ` · desde ${esc(C.nombreMes(e.desde).toLowerCase())}` : ''}</span></span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`).join('') || '<p class="subtitulo">Ninguno todavía.</p>';
 
@@ -950,7 +951,9 @@ function abrirEsperado(grupo = null) {
   const e = grupo ? C.lineasEsperadas(datos.esperados, hoy).find((x) => x.grupo === grupo) : null;
   $('#dlg-esperado-titulo').textContent = e ? 'Cambiar ingreso esperado' : 'Nuevo ingreso esperado';
   $('#esp-nombre').value = e ? e.nombre : '';
-  $('#esp-importe').value = e ? C.importeEditable(e.importe) : '';
+  $('#esp-importe').value = e && e.importe ? C.importeEditable(e.importe) : '';
+  $('#esp-pegar-bloque').hidden = true;
+  $('#esp-pegar-texto').value = '';
   const moneda = e ? e.moneda : datos.moneda;
   $('#esp-moneda').innerHTML = Object.keys(C.MONEDAS)
     .map((cod) => `<label><input type="radio" name="esp-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
@@ -980,23 +983,54 @@ function pintarMesesEsperado(grupo) {
   $('#esp-meses').innerHTML = C.mesesDelAño(año).map((k) => `
     <label class="campo esp-mes">
       <span>${esc(C.nombreMes(k))}</span>
-      <input data-mes="${k}" inputmode="decimal" autocomplete="off" placeholder="Lo habitual" value="${propios.has(k) ? esc(C.importeEditable(propios.get(k))) : ''}">
+      <input data-mes="${k}" inputmode="decimal" autocomplete="off" placeholder="Lo habitual" value="${propios.has(k) ? esc(propios.get(k) ? C.importeEditable(propios.get(k)) : '0') : ''}">
     </label>`).join('');
+}
+
+/** Rellena los campos de cada mes con una lista pegada ("septiembre 2026  $1,308"). */
+function rellenarMesesEsperado() {
+  const err = $('#esp-error');
+  const { porMes, noLeidas } = C.leerListaMeses($('#esp-pegar-texto').value, Number(año.slice(0, 4)));
+  let puestos = 0;
+  for (const inp of document.querySelectorAll('#esp-meses input')) {
+    if (!(inp.dataset.mes in porMes)) continue;
+    const v = porMes[inp.dataset.mes];
+    inp.value = v ? C.importeEditable(v) : '0';
+    puestos++;
+  }
+  const fuera = Object.keys(porMes).length - puestos;
+  if (!puestos) {
+    err.textContent = Object.keys(porMes).length
+      ? `Esos meses no son de ${C.nombreAño(año)}. Cambia de año con las flechas del Historial y vuelve aquí.`
+      : 'No he entendido la lista. Pon una línea por mes, por ejemplo: septiembre 2026 $1,000';
+    err.hidden = false;
+    return;
+  }
+  err.hidden = true;
+  $('#esp-pegar-bloque').hidden = true;
+  const notas = [];
+  if (fuera) notas.push(`${fuera} de otro año no se pusieron`);
+  if (noLeidas.length) notas.push(`${noLeidas.length} línea${noLeidas.length === 1 ? '' : 's'} sin entender`);
+  aviso(`Rellenados ${puestos} meses${notas.length ? ` (${notas.join(', ')})` : ''}. Revisa y dale a Guardar`);
 }
 
 function guardarEsperado() {
   const err = $('#esp-error');
   const nombre = $('#esp-nombre').value.trim().slice(0, 40);
   if (!nombre) { err.textContent = 'Ponle un nombre, por ejemplo Sueldo.'; err.hidden = false; return; }
-  const importe = C.parseImporte($('#esp-importe').value);
-  if (importe == null) { err.textContent = 'Pon cuánto esperas al mes.'; err.hidden = false; return; }
+  const txtHabitual = $('#esp-importe').value.trim();
+  const importe = txtHabitual ? C.parseImporteOCero(txtHabitual) : 0;
+  if (importe == null) { err.textContent = 'Lo habitual tiene que ser un importe, o déjalo vacío.'; err.hidden = false; return; }
   const moneda = document.querySelector('#esp-moneda input:checked')?.value || datos.moneda;
   const porMes = {};
   for (const inp of document.querySelectorAll('#esp-meses input')) {
     const txt = inp.value.trim();
-    const v = txt ? C.parseImporte(txt) : null;
+    const v = txt ? C.parseImporteOCero(txt) : null;
     if (txt && v == null) { err.textContent = `En ${C.nombreMes(inp.dataset.mes).toLowerCase()} pon un importe, o déjalo vacío.`; err.hidden = false; return; }
     porMes[inp.dataset.mes] = v;
+  }
+  if (!importe && !Object.values(porMes).some((v) => v != null)) {
+    err.textContent = 'Pon lo habitual al mes o la cantidad de cada mes.'; err.hidden = false; return;
   }
   datos.esperados = C.ponerEsperado(datos.esperados, editandoEsperado, { nombre, importe, moneda }, $('#esp-desde').value);
   const grupo = editandoEsperado || datos.esperados[datos.esperados.length - 1].grupo;
@@ -1176,6 +1210,8 @@ document.addEventListener('click', (e) => {
     case 'editar-esperado': abrirEsperado(el.dataset.id); break;
     case 'nuevo-esperado': abrirEsperado(); break;
     case 'borrar-esperado': borrarEsperado(); break;
+    case 'esp-pegar': $('#esp-pegar-bloque').hidden = false; $('#esp-pegar-texto').focus(); break;
+    case 'esp-rellenar': rellenarMesesEsperado(); break;
     case 'cerrar': el.closest('dialog').close(); break;
     // En el Historial las flechas mueven de año en año.
     case 'mes-anterior': if (vista === 'historial') año = C.moverMes(año, -12); else mes = C.moverMes(mes, -1); pintar(); break;

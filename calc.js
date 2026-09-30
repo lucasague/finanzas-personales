@@ -553,7 +553,7 @@ function validarEsperados(lista) {
   if (!Array.isArray(lista)) return [];
   const res = [];
   for (const e of lista) {
-    if (!e || !Number.isInteger(e.importe) || e.importe <= 0 || !esClaveMes(e.desde)) continue;
+    if (!e || !Number.isInteger(e.importe) || e.importe < 0 || !esClaveMes(e.desde)) continue;
     const hasta = esClaveMes(e.hasta) && e.hasta >= e.desde ? e.hasta : null;
     res.push({
       id: typeof e.id === 'string' && e.id ? e.id : nuevoId(),
@@ -575,13 +575,46 @@ function validarEsperadosMes(lista) {
   const vistos = new Set();
   const res = [];
   for (const a of lista) {
-    if (!a || typeof a.grupo !== 'string' || !a.grupo || !esClaveMes(a.mes) || !Number.isInteger(a.importe) || a.importe <= 0) continue;
+    if (!a || typeof a.grupo !== 'string' || !a.grupo || !esClaveMes(a.mes) || !Number.isInteger(a.importe) || a.importe < 0) continue;
     const k = `${a.grupo}|${a.mes}`;
     if (vistos.has(k)) continue;
     vistos.add(k);
     res.push({ grupo: a.grupo, mes: a.mes, importe: a.importe, moneda: MONEDAS[a.moneda] ? a.moneda : 'MXN' });
   }
   return res;
+}
+
+/** Como parseImporte, pero acepta el cero ("0", "$0"): lo esperado en un mes puede ser nada. */
+export function parseImporteOCero(texto) {
+  const v = parseImporte(texto);
+  if (v != null) return v;
+  return /^[^\d]*0+([.,]0*)?[^\d]*$/.test(String(texto ?? '').trim()) && /\d/.test(String(texto)) ? 0 : null;
+}
+
+const NOMBRES_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/**
+ * Lee una lista pegada de importes por mes, una línea por mes: "septiembre 2026   $1,308", "oct 26: 3228",
+ * "Enero 2027 $0". Lo que va entre paréntesis se ignora ("(el real fue ...)"). Devuelve { porMes: { mes: importe },
+ * noLeidas: [líneas que no se entienden] }. Una línea sin año toma el de la anterior (o `añoPorDefecto`).
+ */
+export function leerListaMeses(texto, añoPorDefecto) {
+  const porMes = {};
+  const noLeidas = [];
+  let año = añoPorDefecto;
+  for (const cruda of String(texto || '').split(/\r?\n/)) {
+    const linea = cruda.replace(/\([^)]*\)/g, ' ').trim();
+    if (!linea) continue;
+    const m = linea.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .match(/^[^a-z]*([a-z]{3,})\.?\s*(?:de\s+|del\s+)?(\d{4}|\d{2}(?!\d))?\s*[:\-–]?\s*(.*)$/);
+    const n = m ? NOMBRES_MES.indexOf(m[1].slice(0, 3)) : -1;
+    const importe = m ? parseImporteOCero(m[3]) : null;
+    if (n < 0 || importe == null) { noLeidas.push(cruda.trim()); continue; }
+    if (m[2]) año = m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]);
+    if (!año) { noLeidas.push(cruda.trim()); continue; }
+    porMes[`${año}-${String(n + 1).padStart(2, '0')}`] = importe;
+  }
+  return { porMes, noLeidas };
 }
 
 /** Importe y moneda de una línea en un mes: el propio de ese mes si lo tiene, si no lo habitual. */

@@ -358,3 +358,6 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .totales + .barra-fondo { margin-top: 12px; }
 .esp-meses { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .esp-mes { margin-bottom: 8px; }
+#esp-pegar-bloque textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie-2); font: inherit; margin-bottom: 6px; }
+#esp-pegar-bloque { margin-bottom: 12px; }
+#esp-pegar-bloque[hidden] { display: none; }

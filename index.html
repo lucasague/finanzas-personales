@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="dcc65de369">
+  <meta name="version" content="c190937f33">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -201,7 +201,7 @@
       <p class="etiqueta-moneda">En qué moneda lo recibes</p>
       <div class="segmentado monedas" id="esp-moneda" role="radiogroup" aria-label="Moneda"></div>
       <label class="campo">
-        <span>Lo habitual al mes</span>
+        <span>Lo habitual al mes (si cada mes es distinto, déjalo vacío y rellena abajo)</span>
         <input id="esp-importe" inputmode="decimal" autocomplete="off" placeholder="0">
       </label>
       <label class="campo">
@@ -210,7 +210,13 @@
       </label>
       <p class="explica" id="esp-explica"></p>
       <h3 class="grupo-titulo" id="esp-meses-titulo">Mes a mes</h3>
-      <p class="explica">Si algún mes esperas otra cantidad, ponla aquí. Los que dejes vacíos cuentan lo habitual.</p>
+      <p class="explica">Si algún mes esperas otra cantidad, ponla aquí (0 si ese mes no esperas nada). Los que dejes vacíos cuentan lo habitual.</p>
+      <button type="button" class="boton-linea" data-accion="esp-pegar">Pegar una lista de meses</button>
+      <div id="esp-pegar-bloque" hidden>
+        <textarea id="esp-pegar-texto" rows="6" placeholder="septiembre 2026   $1,000&#10;octubre 2026   $1,200&#10;..."></textarea>
+        <p class="explica">Una línea por mes, con el mes, el año y la cantidad. Lo que pongas entre paréntesis no se tiene en cuenta.</p>
+        <button type="button" class="boton" data-accion="esp-rellenar">Rellenar los meses</button>
+      </div>
       <div class="esp-meses" id="esp-meses"></div>
       <p class="error" id="esp-error" hidden></p>
       <div class="acciones">
