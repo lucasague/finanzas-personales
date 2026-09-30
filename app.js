@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '6f0cc6488e';
+const BUILD = '6a9aae8dd0';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -15,6 +15,7 @@ let editandoEsperado = null; // grupo del ingreso esperado en edición, o null s
 let ultimaCategoria = { gasto: null, ingreso: null };
 let ultimaMoneda = null;
 let ultimaCuenta = null;
+let catAbiertas = new Set(); // en Ajustes, las categorías con las subcategorías a la vista
 let baseTocada = false; // si la persona ha escrito a mano lo que le costó en la moneda principal
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
@@ -24,10 +25,19 @@ function cargar() {
     const raw = localStorage.getItem(CLAVE_DATOS);
     if (raw) {
       const r = C.validarCopia(JSON.parse(raw));
-      if (r.ok) return r.datos;
+      if (r.ok) return conIconos(r.datos);
     }
   } catch (e) { /* almacenamiento bloqueado o dañado: empezamos de cero */ }
   return C.datosIniciales();
+}
+
+/** La primera vez, pone icono por el nombre a las categorías que no tienen uno propio, y lo guarda. */
+function conIconos(d) {
+  if (d.iconosAuto) return d;
+  d.categorias = C.ponerIconos(d.categorias);
+  d.iconosAuto = true;
+  try { localStorage.setItem(CLAVE_DATOS, JSON.stringify(d)); } catch (e) { /* se reintenta la próxima vez */ }
+  return d;
 }
 
 function guardar() {
@@ -424,9 +434,22 @@ function pintarAjustes() {
       <span class="flecha" aria-hidden="true">›</span>
     </button>`;
   const suelta = (c) => sinColocar.has(c.id) && !C.hijasDe(datos.categorias, c.id).length;
-  const grupo = (tipo) => C.ordenArbol(datos.categorias, tipo)
-    .filter(({ categoria: c }) => !suelta(c))
-    .map(({ categoria: c, nivel }) => botonCat(c, nivel)).join('') || '<p class="subtitulo">Ninguna.</p>';
+  // Las que tienen subcategorías llevan un › para abrirlas o cerrarlas; de entrada, cerradas (solo las principales).
+  const grupo = (tipo) => {
+    const filas = C.ordenArbol(datos.categorias, tipo).filter(({ categoria: c }) => !suelta(c));
+    const ids = new Set(filas.map((f) => f.categoria.id));
+    const html = filas
+      .filter(({ categoria: c }) => C.rutaCategoria(datos.categorias, c.id).slice(0, -1).every((a) => catAbiertas.has(a.id)))
+      .map(({ categoria: c, nivel }) => {
+        const n = C.hijasDe(datos.categorias, c.id).filter((h) => ids.has(h.id)).length;
+        const abierta = catAbiertas.has(c.id);
+        const plegar = n ? `<button type="button" class="plegar${abierta ? ' abierta' : ''}" data-accion="plegar-cat" data-id="${esc(c.id)}"
+            aria-expanded="${abierta}" aria-label="${esc(`${abierta ? 'Cerrar' : 'Ver'} las ${n} de ${c.nombre}`)}">›</button>` : '<span class="plegar"></span>';
+        return `<div class="cat-fila-aj nivel-${nivel}">${plegar}${botonCat(c, nivel, n && !abierta ? `<br><span class="detalle">${esc(plural(n, 'subcategoría', 'subcategorías'))}</span>` : '')}</div>`;
+      }).join('');
+    return html || '<p class="subtitulo">Ninguna.</p>';
+  };
+  const hayArbol = datos.categorias.some((c) => c.padre);
   const sueltas = datos.categorias.filter(suelta);
   const tarjetaSueltas = sueltas.length ? `
     <div class="tarjeta sin-colocar">
@@ -474,7 +497,8 @@ function pintarAjustes() {
     ${tarjetaSueltas}
     <div class="tarjeta">
       <h2>Categorías y presupuestos</h2>
-      <p class="explica">Toca una para cambiar su nombre, su icono, dentro de cuál va o ponerle un presupuesto al mes. Las que van dentro de otra se ven debajo, un poco hacia la derecha.</p>
+      <p class="explica">Toca una para cambiar su nombre, su icono, dentro de cuál va o ponerle un presupuesto al mes. Toca el › de la izquierda para ver u ocultar sus subcategorías.</p>
+      ${hayArbol ? `<button type="button" class="boton-linea" data-accion="plegar-todas">${catAbiertas.size ? 'Ver solo las categorías' : 'Ver también las subcategorías'}</button>` : ''}
       <h3 class="grupo-titulo">Gastos</h3>
       ${grupo('gasto')}
       <h3 class="grupo-titulo">Ingresos</h3>
@@ -1131,7 +1155,7 @@ async function importar(archivo) {
     peligro: false,
   });
   if (!ok) return;
-  datos = r.datos;
+  datos = conIconos(r.datos);
   año = añoDeHoy();
   guardar();
   aviso(r.descartados ? `Copia recuperada (${r.descartados} movimientos no se pudieron leer)` : 'Copia recuperada');
@@ -1227,6 +1251,14 @@ document.addEventListener('click', (e) => {
     case 'editar-mov': abrirMovimiento(el.dataset.id); break;
     case 'borrar-mov': borrarMovimiento(); break;
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
+    case 'plegar-cat':
+      if (!catAbiertas.delete(el.dataset.id)) catAbiertas.add(el.dataset.id);
+      pintarAjustes();
+      break;
+    case 'plegar-todas':
+      catAbiertas = catAbiertas.size ? new Set() : new Set(datos.categorias.filter((c) => C.hijasDe(datos.categorias, c.id).length).map((c) => c.id));
+      pintarAjustes();
+      break;
     case 'nueva-cat': abrirCategoria(); break;
     case 'borrar-cat': borrarCategoria(); break;
     case 'pasar-cat': mostrarPasar(); break;
@@ -1271,6 +1303,14 @@ $('#mov-moneda').addEventListener('change', () => { baseTocada = false; actualiz
 $('#mov-importe').addEventListener('input', actualizarBase);
 $('#mov-fecha').addEventListener('change', actualizarBase);
 $('#mov-importe-base').addEventListener('input', () => { baseTocada = $('#mov-importe-base').value.trim() !== ''; actualizarBase(); });
+// Al escribir el nombre, el icono se sugiere solo (mientras no se haya puesto uno a mano).
+let iconoSugerido = null;
+$('#cat-nombre').addEventListener('input', () => {
+  const actual = $('#cat-emoji').value.trim();
+  if (actual && actual !== C.EMOJI_CATEGORIA_NUEVA && actual !== iconoSugerido) return;
+  const e = C.emojiPorNombre($('#cat-nombre').value);
+  if (e) { $('#cat-emoji').value = e; iconoSugerido = e; }
+});
 for (const r of document.querySelectorAll('#form-cat input[name="cat-tipo"]')) {
   r.addEventListener('change', () => {
     $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso';

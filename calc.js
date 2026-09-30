@@ -49,6 +49,7 @@ export function datosIniciales() {
     sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
     esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
     esperadosMes: [], // lo esperado de un mes concreto, cuando no es lo habitual
+    iconosAuto: true, // ya se pusieron los iconos por el nombre (ver ponerIconos)
   };
 }
 
@@ -363,6 +364,8 @@ export function validarCopia(obj) {
         // Hasta la versión 5 no había ingreso esperado.
         esperados: validarEsperados(obj.esperados),
         esperadosMes: validarEsperadosMes(obj.esperadosMes),
+        // Hasta la versión 6 no se ponían iconos por el nombre: se ponen una vez al abrir.
+        iconosAuto: obj.iconosAuto === true,
       },
       descartados,
     };
@@ -764,6 +767,77 @@ export function esperadoVsRealDeLinea(movimientos, esperados, grupo, desde, tasa
 const COLUMNAS_WALLET = ['account', 'category', 'currency', 'amount', 'type', 'date'];
 export const EMOJI_CATEGORIA_NUEVA = '🏷️';
 
+// ---------- Icono según el nombre ----------
+// Cada regla: icono y palabras (sin tildes, en minúscula). Una palabra vale si alguna del nombre empieza por ella;
+// "a b" pide las dos. Van de lo más concreto a lo más general: la primera que encaja gana.
+const ICONOS_POR_NOMBRE = [
+  ['⛽', ['gasolina', 'combustible', 'diesel']], ['🚕', ['taxi', 'uber', 'didi']],
+  ['🚌', ['autobus', 'bus', 'camion', 'transporte']], ['🛣️', ['caseta', 'peaje', 'autopista']],
+  ['🅿️', ['estacionamiento', 'parking', 'parquimetro']], ['🚆', ['tren', 'metro']],
+  ['🔧', ['taller mecanico', 'mecanico']], ['🚗', ['auto', 'coche', 'carro', 'vehiculo']],
+  ['🛒', ['supermercado', 'super', 'despensa', 'mandado', 'mercado']], ['🍴', ['restaurante', 'restaurant', 'cena', 'comida rapida']],
+  ['☕', ['cafe', 'cafeteria']], ['🏪', ['tiendita', 'tienda', 'abarrote', 'oxxo']], ['🍬', ['golosina', 'dulce', 'snack', 'capricho', 'antojo']],
+  ['🍽️', ['comida', 'alimento', 'alimentacion']],
+  ['🎮', ['app entretenimiento', 'videojuego', 'juego']], ['📺', ['streaming', 'netflix', 'spotify', 'suscripcion', 'television']],
+  ['📲', ['app', 'aplicacion', 'software']], ['📱', ['telefono', 'celular', 'movil', 'plan de datos']],
+  ['🌐', ['internet', 'wifi']], ['💻', ['tecnologia', 'computadora', 'electronico', 'informatica']],
+  ['🎁', ['regalo']], ['👕', ['ropa', 'zapato', 'calzado', 'vestido']], ['🛋️', ['hogar', 'mueble', 'decoracion']],
+  ['🔧', ['herramienta', 'ferreteria']], ['🛍️', ['compra']],
+  ['💊', ['medicamento', 'medicina', 'farmacia']], ['🦷', ['dentista', 'dental']], ['👓', ['optica', 'lente']],
+  ['🩺', ['consulta', 'medic', 'doctor', 'hospital', 'salud', 'analisis']],
+  ['🙏', ['retiro', 'misa', 'parroquia', 'iglesia']], ['🤝', ['donacion', 'donativo', 'diezmo', 'ofrenda', 'caridad']],
+  ['⛪', ['ignis', 'mision']],
+  ['✈️', ['vuelo', 'avion', 'viaje']], ['🏨', ['hotel', 'hospedaje', 'airbnb', 'alojamiento']],
+  ['🔥', ['gas']], ['💡', ['luz', 'electricidad']], ['💧', ['agua']], ['🧾', ['impuesto', 'predial', 'tramite', 'papeleo']],
+  ['🛡️', ['seguro']], ['🔨', ['reparacion', 'mantenimiento', 'arreglo']], ['🧹', ['limpieza']],
+  ['💸', ['comision', 'interes', 'recargo']], ['🏦', ['financ', 'banco']], ['💳', ['deuda', 'prestamo', 'credito', 'tarjeta']],
+  ['🐷', ['ahorro']], ['📈', ['inversion']], ['💡', ['servicio']],
+  ['🏠', ['vivienda', 'casa', 'renta', 'alquiler', 'hipoteca']],
+  ['🎟️', ['evento', 'concierto', 'entrada', 'boleto']], ['🏞️', ['paseo', 'excursion', 'salida']], ['🎬', ['cine', 'pelicula']],
+  ['🎉', ['entretenimiento', 'ocio', 'diversion', 'fiesta']],
+  ['🏊', ['natacion', 'alberca', 'piscina']], ['🎵', ['canto', 'musica', 'piano', 'guitarra']],
+  ['🧸', ['cuido', 'guarderia', 'nana', 'ninera']], ['⚽', ['deporte', 'futbol']], ['🏋️', ['gimnasio', 'gym']],
+  ['📚', ['curso', 'clase', 'taller', 'libro', 'utiles']], ['🎓', ['educacion', 'escuela', 'colegio', 'colegiatura', 'universidad']],
+  ['👨‍👩‍👧', ['familia']], ['🍼', ['bebe', 'panal']], ['💇', ['peluqueria', 'belleza', 'corte de pelo']],
+  ['🐕', ['veterinario']], ['🐾', ['mascota', 'perro', 'gato']],
+  ['💍', ['joyeria', 'joya']], ['💼', ['sueldo', 'salario', 'nomina', 'trabajo']], ['💰', ['ingreso', 'venta', 'cobro']],
+  ['🧾', ['otro']],
+];
+
+const palabrasDe = (texto) => texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .split(/[^a-z0-9]+/).filter(Boolean);
+
+/** El icono que le va a una categoría por su nombre ("Gasolina" -> ⛽), o null si no se sabe. */
+export function emojiPorNombre(nombre) {
+  const palabras = palabrasDe(String(nombre || ''));
+  const hay = (clave) => clave.split(' ').every((k) => palabras.some((p) => p.startsWith(k)));
+  for (const [emoji, claves] of ICONOS_POR_NOMBRE) if (claves.some(hay)) return emoji;
+  return null;
+}
+
+// Si el nombre no dice nada (un nombre de persona, de un colegio), se tira de dónde cuelga.
+const ICONO_SEGUN_PADRE = { '🎓': '🧑‍🎓', '🧑‍🎓': '🏫', '💰': '💼' };
+
+/**
+ * Pone icono por el nombre a las categorías sin icono propio (vacío o la etiqueta genérica); si el nombre no da
+ * pista, uno según la de arriba (en Educación, una persona 🧑‍🎓 y lo suyo 🏫). Las que ya tienen icono, igual.
+ */
+export function ponerIconos(categorias) {
+  const porId = new Map(categorias.map((c) => [c.id, c]));
+  const hecho = new Map();
+  const icono = (c, prof = 0) => {
+    if (hecho.has(c.id)) return hecho.get(c.id);
+    let e = c.emoji;
+    if (!e || e === EMOJI_CATEGORIA_NUEVA) {
+      const padre = c.padre && prof < 10 ? porId.get(c.padre) : null;
+      e = emojiPorNombre(c.nombre) || (padre && ICONO_SEGUN_PADRE[icono(padre, prof + 1)]) || c.emoji;
+    }
+    hecho.set(c.id, e);
+    return e;
+  };
+  return categorias.map((c) => (icono(c) === c.emoji ? c : { ...c, emoji: icono(c) }));
+}
+
 /** Texto CSV -> filas (listas de campos). Quita el BOM, detecta ";" o "," por la cabecera y entiende comillas. */
 export function parseCSV(texto) {
   let s = String(texto ?? '');
@@ -907,7 +981,7 @@ export function prepararWallet(filas, datos) {
       if (!categoria) {
         let n = catsNuevas.get(k);
         if (!n) {
-          n = { categoria: { id: nuevoId(), emoji: EMOJI_CATEGORIA_NUEVA, nombre: f.category.slice(0, 40), tipo, presupuesto: null, padre: null }, tipos: new Map() };
+          n = { categoria: { id: nuevoId(), emoji: emojiPorNombre(f.category) || EMOJI_CATEGORIA_NUEVA, nombre: f.category.slice(0, 40), tipo, presupuesto: null, padre: null }, tipos: new Map() };
           catsNuevas.set(k, n);
         }
         sumarUno(n.tipos, tipo);
@@ -1227,7 +1301,7 @@ export function planOrganizar(nodos, categorias, movimientos = []) {
       p.cat.padre = padre;
       p.cat.nombre = p.nombre;
     } else {
-      p.cat = { id: nuevoId() + i.toString(36), emoji: p.nivel === 1 ? EMOJI_CATEGORIA_NUEVA : '', nombre: p.nombre, tipo: p.tipo, presupuesto: null, padre };
+      p.cat = { id: nuevoId() + i.toString(36), emoji: emojiPorNombre(p.nombre) || (p.nivel === 1 ? EMOJI_CATEGORIA_NUEVA : ''), nombre: p.nombre, tipo: p.tipo, presupuesto: null, padre };
     }
     if (estado === 'nueva') nuevas++; else if (estado === 'movida') movidas++; else iguales++;
     return { nombre: p.nombre, tipo: p.tipo, nivel: p.nivel, estado, id: p.cat.id, antes, juntadas: [] };
