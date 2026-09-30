@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'c190937f33';
+const BUILD = '6f0cc6488e';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -142,7 +142,7 @@ function pintarResumen() {
   if (sinConvertir) {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no entra${sinConvertir === 1 ? '' : 'n'} en los totales porque falta su tipo de cambio.</p>`;
   }
-  html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas, datos.esperadosMes), r.ingresos);
+  html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas, datos.esperadosMes), r.ingresos, tasas);
 
   if (!hayMovs && !filas.length) {
     html += `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🌱</span>
@@ -172,7 +172,7 @@ function pintarResumen() {
 }
 
 /** Esperado frente a real del mes, en el Resumen. Nada si no hay ingreso esperado ese mes. */
-function tarjetaEsperado(e, real) {
+function tarjetaEsperado(e, real, tasas) {
   if (!e.lineas.length) return '';
   const hoy = C.claveMes(C.hoyISO());
   const dif = real - e.total;
@@ -180,10 +180,19 @@ function tarjetaEsperado(e, real) {
   const nota = dif >= 0
     ? (dif ? `${dinero(dif)} más de lo esperado` : 'Justo lo esperado')
     : (mes > hoy ? 'Este mes aún no ha llegado' : `Faltan ${dinero(-dif)} para lo esperado`);
-  const lineas = e.lineas.map((l) => `${l.nombre}: ${C.formatoMoneda(l.importe, l.moneda)}${l.moneda !== datos.moneda && l.enBase != null ? ` (≈ ${dinero(l.enBase)})` : ''}`);
+  // Cada fuente: lo esperado y, si tiene categoría, lo que entró en ella (en su moneda).
+  const lineas = e.lineas.map((l) => {
+    let txt = `${l.nombre}: esperado ${C.formatoMoneda(l.importe, l.moneda)}${l.moneda !== datos.moneda && l.enBase != null ? ` (≈ ${dinero(l.enBase)})` : ''}`;
+    if (l.categoria) {
+      const otras = e.lineas.filter((x) => x.grupo !== l.grupo).map((x) => x.categoria);
+      const rl = C.realDeCategoria(datos.movimientos, mes, datos.categorias, l.categoria, l.moneda, tasas, otras);
+      txt += ` · real ${C.formatoMoneda(rl.total, l.moneda)}`;
+    }
+    return txt;
+  });
   return `
     <div class="tarjeta">
-      <h2>Ingreso esperado</h2>
+      <h2>Ingreso esperado (todo)</h2>
       <div class="totales">
         <div><span class="t-etq">Esperado</span><span class="t-val">${esc(dinero(e.total))}</span></div>
         <div><span class="t-etq">Real</span><span class="t-val ingreso">${esc(dinero(real))}</span></div>
@@ -344,7 +353,10 @@ function pintarHistorial() {
   $('#vista-historial').innerHTML = html;
 }
 
-/** Esperado frente a real de cada mes del año, en el Historial. */
+/**
+ * Esperado frente a real de cada mes del año, en el Historial: una tabla con todo y otra por cada fuente que tiene
+ * categoría (en su moneda).
+ */
 function tablaEsperado(movs, tasas, hoy) {
   const r = C.esperadoVsReal(movs, datos.esperados, año, datos.moneda, tasas, datos.esperadosMes);
   if (!r.hayAlguno) {
@@ -352,29 +364,44 @@ function tablaEsperado(movs, tasas, hoy) {
       <p class="explica">Pon cuánto esperas ingresar al mes y aquí lo verás junto a lo que de verdad entró, mes a mes.</p>
       <button type="button" class="boton-linea" data-accion="nuevo-esperado">+ Poner ingreso esperado</button></div>`;
   }
+  let html = tablaEsperadoReal('Esperado y real: todo', r.meses, hoy, datos.moneda,
+    'Todos tus ingresos frente a todo lo que esperabas. Los meses que aún no han llegado solo muestran lo esperado. Para poner otra cantidad en un mes, toca el ingreso en Ajustes.');
+  const grupos = [...new Set(C.lineasEsperadas(datos.esperados, hoy).map((e) => e.grupo))];
+  for (const g of grupos) {
+    const rl = C.esperadoVsRealDeLinea(datos.movimientos, datos.esperados, g, año, tasas, datos.esperadosMes, datos.categorias, hoy);
+    if (!rl || !rl.hayAlguno) continue;
+    html += tablaEsperadoReal(`Esperado y real: ${rl.nombre}`, rl.meses, hoy, rl.moneda,
+      `Solo lo apuntado en ${C.textoRuta(datos.categorias, rl.categoria) || 'su categoría'}, en ${nombreCorto[rl.moneda] || rl.moneda}.`);
+  }
+  return html;
+}
+
+function tablaEsperadoReal(titulo, meses, hoy, moneda, explica) {
+  const din = (c) => C.formatoMoneda(c, moneda);
   const mesCorto = (k) => `${esc(C.nombreMes(k).slice(0, 3))} ${esc(k.slice(2, 4))}`;
-  const conSigno = (v) => `<span class="${v < 0 ? 'gasto' : 'ingreso'}">${v < 0 ? '−' : '+'}${esc(dinero(Math.abs(v)))}</span>`;
+  const conSigno = (v) => `<span class="${v < 0 ? 'gasto' : 'ingreso'}">${v < 0 ? '−' : '+'}${esc(din(Math.abs(v)))}</span>`;
+  const r = { meses };
   let filas = '';
   let tEsp = 0;
   let tReal = 0;
   for (const f of r.meses) {
     if (!f.hayEsperado) {
-      filas += `<tr class="vacia"><td>${mesCorto(f.clave)}</td><td>—</td><td>${f.real ? esc(dinero(f.real)) : '—'}</td><td></td></tr>`;
+      filas += `<tr class="vacia"><td>${mesCorto(f.clave)}</td><td>—</td><td>${f.real ? esc(din(f.real)) : '—'}</td><td></td></tr>`;
       continue;
     }
     const futuro = f.clave > hoy;
     if (!futuro) { tEsp += f.esperado; tReal += f.real; }
-    filas += `<tr class="${futuro ? 'futuro' : ''}"><td>${mesCorto(f.clave)}</td><td>${esc(dinero(f.esperado))}${f.sinTasa ? '*' : ''}</td><td>${futuro ? '' : esc(dinero(f.real))}</td><td>${futuro ? '' : conSigno(f.diferencia)}</td></tr>`;
+    filas += `<tr class="${futuro ? 'futuro' : ''}"><td>${mesCorto(f.clave)}</td><td>${esc(din(f.esperado))}${f.sinTasa ? '*' : ''}</td><td>${futuro ? '' : esc(din(f.real))}</td><td>${futuro ? '' : conSigno(f.diferencia)}</td></tr>`;
   }
   const hayTasa = r.meses.some((f) => f.sinTasa);
-  return `<div class="tarjeta"><h2>Esperado y real</h2>
-    <p class="explica">Lo que esperabas ingresar cada mes y lo que de verdad entró. Los meses que aún no han llegado solo muestran lo esperado. Para poner otra cantidad en un mes, toca el ingreso en Ajustes.</p>
+  return `<div class="tarjeta"><h2>${esc(titulo)}</h2>
+    <p class="explica">${esc(explica)}</p>
     <table class="tabla-esperado">
       <thead><tr><th></th><th>Esperado</th><th>Real</th><th>Diferencia</th></tr></thead>
       <tbody>${filas}</tbody>
-      <tfoot><tr><td>Total</td><td>${esc(dinero(tEsp))}</td><td>${esc(dinero(tReal))}</td><td>${conSigno(tReal - tEsp)}</td></tr></tfoot>
+      <tfoot><tr><td>Total</td><td>${esc(din(tEsp))}</td><td>${esc(din(tReal))}</td><td>${conSigno(tReal - tEsp)}</td></tr></tfoot>
     </table>
-    <p class="explica">El total cuenta solo los meses que ya pasaron o están en curso y tienen algo esperado.${hayTasa ? ' * Hay algo esperado en otra moneda que no suma porque aún no sé su tipo de cambio.' : ''}</p>
+    <p class="explica">El total cuenta solo los meses que ya pasaron o están en curso y tienen algo esperado.${hayTasa ? ' * Hay algo en otra moneda que no suma porque aún no sé su tipo de cambio.' : ''}</p>
   </div>`;
 }
 
@@ -954,6 +981,9 @@ function abrirEsperado(grupo = null) {
   $('#esp-importe').value = e && e.importe ? C.importeEditable(e.importe) : '';
   $('#esp-pegar-bloque').hidden = true;
   $('#esp-pegar-texto').value = '';
+  const catSel = e ? e.categoria : null;
+  $('#esp-categoria').innerHTML = '<option value="">Ninguna (solo cuenta en el total)</option>'
+    + C.ordenArbol(datos.categorias, 'ingreso').map(({ categoria: c }) => `<option value="${esc(c.id)}" ${c.id === catSel ? 'selected' : ''}>${esc(C.textoRuta(datos.categorias, c.id))}</option>`).join('');
   const moneda = e ? e.moneda : datos.moneda;
   $('#esp-moneda').innerHTML = Object.keys(C.MONEDAS)
     .map((cod) => `<label><input type="radio" name="esp-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
@@ -1032,7 +1062,8 @@ function guardarEsperado() {
   if (!importe && !Object.values(porMes).some((v) => v != null)) {
     err.textContent = 'Pon lo habitual al mes o la cantidad de cada mes.'; err.hidden = false; return;
   }
-  datos.esperados = C.ponerEsperado(datos.esperados, editandoEsperado, { nombre, importe, moneda }, $('#esp-desde').value);
+  const categoria = $('#esp-categoria').value || null;
+  datos.esperados = C.ponerEsperado(datos.esperados, editandoEsperado, { nombre, importe, moneda, categoria }, $('#esp-desde').value);
   const grupo = editandoEsperado || datos.esperados[datos.esperados.length - 1].grupo;
   datos.esperadosMes = C.ponerEsperadosMes(datos.esperadosMes, grupo, porMes, importe, moneda);
   if (!guardar()) return;

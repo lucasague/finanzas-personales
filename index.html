@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="c190937f33">
+  <meta name="version" content="6f0cc6488e">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -200,6 +200,10 @@
       </label>
       <p class="etiqueta-moneda">En qué moneda lo recibes</p>
       <div class="segmentado monedas" id="esp-moneda" role="radiogroup" aria-label="Moneda"></div>
+      <label class="campo">
+        <span>Con qué categoría lo apuntas (para verlo también por separado)</span>
+        <select id="esp-categoria"></select>
+      </label>
       <label class="campo">
         <span>Lo habitual al mes (si cada mes es distinto, déjalo vacío y rellena abajo)</span>
         <input id="esp-importe" inputmode="decimal" autocomplete="off" placeholder="0">

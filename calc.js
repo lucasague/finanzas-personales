@@ -563,6 +563,8 @@ function validarEsperados(lista) {
       moneda: MONEDAS[e.moneda] ? e.moneda : 'MXN',
       desde: e.desde,
       hasta,
+      // La categoría de ingreso con la que se apunta, para compararlo por separado (null: solo cuenta en el total).
+      categoria: typeof e.categoria === 'string' && e.categoria ? e.categoria : null,
     });
   }
   return res;
@@ -664,7 +666,7 @@ export function lineasEsperadas(esperados, hoy) {
 export function ponerEsperado(esperados, grupo, campos, desde) {
   const g = grupo || nuevoId();
   const res = quitarEsperado(esperados, g, desde);
-  res.push({ id: nuevoId(), grupo: g, nombre: campos.nombre, importe: campos.importe, moneda: campos.moneda, desde, hasta: null });
+  res.push({ id: nuevoId(), grupo: g, nombre: campos.nombre, importe: campos.importe, moneda: campos.moneda, desde, hasta: null, categoria: campos.categoria || null });
   return res;
 }
 
@@ -710,6 +712,48 @@ export function esperadoVsReal(movs, esperados, desde, base, tasas, esperadosMes
     return { clave: f.clave, esperado: e.total, real: f.ingresos, diferencia: f.ingresos - e.total, sinTasa: e.sinTasa, hayEsperado: e.lineas.length > 0 };
   });
   return { meses, hayAlguno: meses.some((f) => f.hayEsperado) };
+}
+
+/**
+ * Lo que de verdad entró en un mes en una categoría de ingreso (con sus subcategorías), en la moneda `moneda`.
+ * Recibe los movimientos tal cual (sin pasar a la principal). `otras`: categorías de otras fuentes; si alguna cuelga
+ * de esta (Sueldo › Socratic), lo suyo no se cuenta aquí, para no contarlo dos veces.
+ */
+export function realDeCategoria(movimientos, clave, categorias, catId, moneda, tasas, otras = []) {
+  const ids = descendientes(categorias, catId);
+  for (const o of otras) if (o && o !== catId && ids.has(o)) for (const x of descendientes(categorias, o)) ids.delete(x);
+  let total = 0;
+  let sinTasa = 0;
+  for (const m of movimientos) {
+    if (m.tipo !== 'ingreso' || !ids.has(m.categoria) || claveMes(m.fecha) !== clave) continue;
+    const v = valorEn(m, moneda, tasas);
+    if (v == null) sinTasa++;
+    else total += v;
+  }
+  return { total, sinTasa };
+}
+
+/**
+ * Esperado frente a real de una sola línea (una fuente de ingreso con su categoría), mes a mes del año que empieza
+ * en `desde`, en la moneda de la línea: así un sueldo en dólares se compara en dólares, sin que el tipo de cambio
+ * meta ruido. Recibe los movimientos tal cual. Devuelve null si la línea no tiene categoría.
+ */
+export function esperadoVsRealDeLinea(movimientos, esperados, grupo, desde, tasas, esperadosMes, categorias, hoy) {
+  const linea = lineasEsperadas(esperados, hoy).find((e) => e.grupo === grupo)
+    || (esperados || []).filter((e) => e.grupo === grupo).sort((a, b) => b.desde.localeCompare(a.desde))[0];
+  if (!linea || !linea.categoria) return null;
+  const moneda = linea.moneda;
+  const otras = lineasEsperadas(esperados, hoy).filter((e) => e.grupo !== grupo).map((e) => e.categoria);
+  const meses = mesesDelAño(desde).map((clave) => {
+    const tramo = (esperados || []).find((e) => e.grupo === grupo && cubre(e, clave));
+    const real = realDeCategoria(movimientos, clave, categorias, linea.categoria, moneda, tasas, otras);
+    if (!tramo) return { clave, esperado: 0, real: real.total, diferencia: 0, sinTasa: real.sinTasa, hayEsperado: false };
+    const { importe, moneda: mo } = importeDelMes(tramo, clave, esperadosMes);
+    const t = tasa(tasas, mo, moneda, clave);
+    const esperado = t == null ? 0 : Math.round(importe * t);
+    return { clave, esperado, real: real.total, diferencia: real.total - esperado, sinTasa: real.sinTasa + (t == null ? 1 : 0), hayEsperado: true };
+  });
+  return { nombre: linea.nombre, moneda, categoria: linea.categoria, meses, hayAlguno: meses.some((f) => f.hayEsperado) };
 }
 
 // ---------- Traer datos de Wallet (BudgetBakers) ----------
