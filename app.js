@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '8257c8ff5f';
+const BUILD = '904e244ba4';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -703,17 +703,18 @@ function actualizarBase() {
   const otra = moneda !== datos.moneda;
   $('#mov-base').hidden = !otra;
   if (!otra) return;
-  $('#mov-base-etiqueta').textContent = `${tipoMov() === 'ingreso' ? 'Lo que recibiste' : 'Lo que te costó'} en ${nombreCorto[datos.moneda] || datos.moneda}`;
+  $('#mov-base-etiqueta').textContent = `${tipoMov() === 'ingreso' ? 'Lo que recibiste' : 'Lo que te costó'} en ${nombreCorto[datos.moneda] || datos.moneda} (opcional)`;
   const importe = C.parseImporte($('#mov-importe').value);
   const fecha = C.esFechaISO($('#mov-fecha').value) ? $('#mov-fecha').value : C.hoyISO();
   const otros = datos.movimientos.filter((x) => x.id !== editandoMov);
   const t = C.tasa(C.tasasImplicitas(otros), moneda, datos.moneda, C.claveMes(fecha));
-  if (!baseTocada) $('#mov-importe-base').value = importe != null && t != null ? C.importeEditable(Math.round(importe * t)) : '';
+  // Opcional: lo propuesto solo se ve de sombra; se guarda únicamente lo que la persona escribe.
+  $('#mov-importe-base').placeholder = importe != null && t != null ? C.importeEditable(Math.round(importe * t)) : '0';
   const base = C.parseImporte($('#mov-importe-base').value);
   const nota = $('#mov-tasa');
   if (importe != null && base != null) nota.textContent = `Tipo de cambio: ${C.textoTipoDeCambio(moneda, datos.moneda, base / importe)}`;
-  else if (t == null) nota.textContent = 'Mira en tu estado de cuenta cuánto te cobraron y escríbelo aquí.';
-  else nota.textContent = '';
+  else if (t == null) nota.textContent = 'Si fue una compra con dos monedas, escribe cuánto te cobraron. Si no, déjalo vacío.';
+  else nota.textContent = 'Déjalo vacío si pagaste en esta moneda. Se convierte solo en las estadísticas.';
 }
 
 function guardarMovimiento() {
@@ -726,10 +727,6 @@ function guardarMovimiento() {
   let importeBase = null;
   if (moneda !== datos.moneda) {
     importeBase = C.parseImporte($('#mov-importe-base').value);
-    if (importeBase == null) {
-      err.textContent = `Escribe también cuánto fue en ${nombreCorto[datos.moneda] || datos.moneda}.`;
-      err.hidden = false; $('#mov-importe-base').focus(); return;
-    }
   }
   const tipo = tipoMov();
   const cat = catSeleccionada();
