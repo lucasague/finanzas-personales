@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="7bfde5db5f">
+  <meta name="version" content="4c2dd65dbd">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -121,6 +121,7 @@
         <span>Presupuesto al mes (opcional)</span>
         <input id="cat-presupuesto" inputmode="decimal" autocomplete="off" placeholder="Sin presupuesto">
       </label>
+      <button type="button" class="boton-linea" data-accion="ver-movs-cat" id="cat-ver-movs" hidden>Ver sus movimientos…</button>
       <button type="button" class="boton-linea" data-accion="pasar-cat" hidden>Pasar sus movimientos a otra…</button>
       <div id="cat-pasar" class="bloque-base" hidden>
         <label class="campo">
@@ -141,6 +142,16 @@
   </dialog>
 
   <!-- Organizar las categorías con una lista escrita -->
+  <!-- Movimientos de una categoría, para cambiarles la categoría uno a uno -->
+  <dialog id="dlg-movs-cat" class="hoja" aria-labelledby="dlg-movs-cat-titulo">
+    <div class="hoja-cabecera">
+      <h2 id="dlg-movs-cat-titulo">Movimientos</h2>
+      <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <p class="explica">Toca uno para cambiarle la categoría. Al guardar, sale de esta lista.</p>
+    <div id="movs-cat-lista"></div>
+  </dialog>
+
   <dialog id="dlg-lista" class="hoja" aria-labelledby="dlg-lista-titulo">
     <div class="hoja-cabecera">
       <h2 id="dlg-lista-titulo">Organizar con una lista</h2>

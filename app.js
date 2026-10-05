@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '7bfde5db5f';
+const BUILD = '4c2dd65dbd';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -790,6 +790,7 @@ function abrirCategoria(id = null) {
   $('#cat-presupuesto').value = c && c.presupuesto ? C.importeEditable(c.presupuesto) : '';
   $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso';
   $('#cat-borrar').hidden = !c;
+  $('#cat-ver-movs').hidden = !c || !datos.movimientos.some((m) => m.categoria === c.id);
   $('#cat-archivar').hidden = !c;
   $('#cat-archivar').textContent = c && c.archivada ? 'Desarchivar' : 'Archivar';
   $('#cat-pasar').hidden = true;
@@ -838,6 +839,29 @@ function guardarCategoria() {
   $('#dlg-cat').close();
   aviso('Categoría guardada');
   pintar();
+}
+
+let listaDeCat = null; // categoría cuya lista de movimientos está abierta (para volver a ella tras editar uno)
+
+/** Todos los movimientos de una categoría, más recientes primero, para cambiarles la categoría uno a uno. */
+function verMovimientosDeCat(id) {
+  listaDeCat = id;
+  const c = datos.categorias.find((x) => x.id === id);
+  const lista = datos.movimientos.filter((m) => m.categoria === id)
+    .sort((x, y) => y.fecha.localeCompare(x.fecha) || ((y.creado || 0) - (x.creado || 0)));
+  $('#dlg-movs-cat-titulo').textContent = c ? c.nombre : 'Movimientos';
+  const html = lista.map((m) => {
+    const signo = m.tipo === 'ingreso' ? '+' : '−';
+    return `<li><button type="button" class="mov" data-accion="editar-mov-de-cat" data-id="${esc(m.id)}">
+      <span class="texto">
+        <span class="titulo">${esc(m.nota || (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto'))}</span>
+        <span class="detalle">${esc(C.fechaDMA(m.fecha))}</span>
+      </span>
+      <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, m.moneda || datos.moneda))}</span>
+    </button></li>`;
+  }).join('');
+  $('#movs-cat-lista').innerHTML = lista.length ? `<ul class="lista">${html}</ul>` : '<p class="subtitulo">Ya no queda ninguno.</p>';
+  if (!$('#dlg-movs-cat').open) $('#dlg-movs-cat').showModal();
 }
 
 /** Archivar saca la categoría (y sus subcategorías) de las que se ofrecen al apuntar; sus movimientos no se tocan. */
@@ -1340,6 +1364,8 @@ document.addEventListener('click', (e) => {
     case 'nueva-cat': abrirCategoria(); break;
     case 'borrar-cat': borrarCategoria(); break;
     case 'archivar-cat': archivarCategoria(); break;
+    case 'ver-movs-cat': { const id = editandoCat; $('#dlg-cat').close(); verMovimientosDeCat(id); break; }
+    case 'editar-mov-de-cat': $('#dlg-movs-cat').close(); abrirMovimiento(el.dataset.id); break;
     case 'pasar-cat': mostrarPasar(); break;
     case 'pasar-cat-ok': pasarCategoria(); break;
     case 'organizar': abrirLista(); break;
@@ -1383,6 +1409,19 @@ $('#vista-historial').addEventListener('change', (e) => {
   const hasta = $('#per-hasta').value;
   rango = desde <= hasta ? { desde, hasta } : { desde: hasta, hasta: desde };
   pintar();
+});
+
+// Al cerrar un movimiento abierto desde la lista de una categoría, se vuelve a la lista (ya sin el que se movió).
+$('#dlg-mov').addEventListener('close', () => {
+  setTimeout(() => {
+    if (!listaDeCat || $('#dlg-mov').open || $('#dlg-movs-cat').open) return;
+    // Si lo que sigue es "¿Borrar?", no se vuelve a la lista.
+    if ($('#dlg-confirmar').open) listaDeCat = null;
+    else verMovimientosDeCat(listaDeCat);
+  }, 0);
+});
+$('#dlg-movs-cat').addEventListener('close', () => {
+  setTimeout(() => { if (!$('#dlg-mov').open && !$('#dlg-movs-cat').open) listaDeCat = null; }, 0);
 });
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
