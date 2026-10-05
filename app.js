@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '4c2dd65dbd';
+const BUILD = '8257c8ff5f';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -278,7 +278,7 @@ function pintarMovimientos() {
     const ruta = c.id ? rutaDe(c.id) : c.nombre;
     let detalle = m.nota ? ruta : (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto');
     detalle += ` · ${cuenta(m.cuenta).nombre}`;
-    if (otraMoneda) detalle += enPrincipal != null ? ` · ${dinero(enPrincipal)}` : ' · sin tipo de cambio';
+    if (otraMoneda && m.importeBase && enPrincipal != null) detalle += ` · ${dinero(enPrincipal)}`;
     html += `<li><button type="button" class="mov" data-accion="editar-mov" data-id="${esc(m.id)}">
       <span class="emoji" aria-hidden="true">${esc(c.id ? emojiDe(c) : c.emoji)}</span>
       <span class="texto">
