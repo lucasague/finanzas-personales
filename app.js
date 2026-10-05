@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '5b5471cc17';
+const BUILD = '7bfde5db5f';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -481,10 +481,10 @@ function pintarAjustes() {
       <span class="texto">${esc(c.nombre)}${c.presupuesto ? `<br><span class="detalle">Presupuesto: ${esc(dinero(c.presupuesto))} al mes</span>` : ''}${detalle}</span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`;
-  const suelta = (c) => sinColocar.has(c.id) && !C.hijasDe(datos.categorias, c.id).length;
+  const suelta = (c) => sinColocar.has(c.id) && !c.archivada && !C.hijasDe(datos.categorias, c.id).length;
   // Las que tienen subcategorías llevan un › para abrirlas o cerrarlas; de entrada, cerradas (solo las principales).
   const grupo = (tipo) => {
-    const filas = C.ordenArbol(datos.categorias, tipo).filter(({ categoria: c }) => !suelta(c));
+    const filas = C.ordenArbol(datos.categorias, tipo).filter(({ categoria: c }) => !suelta(c) && !c.archivada);
     const ids = new Set(filas.map((f) => f.categoria.id));
     const html = filas
       .filter(({ categoria: c }) => C.rutaCategoria(datos.categorias, c.id).slice(0, -1).every((a) => catAbiertas.has(a.id)))
@@ -504,6 +504,13 @@ function pintarAjustes() {
       <h2>Sin colocar (${sueltas.length})</h2>
       <p class="explica">Venían de antes, tienen movimientos y no estaban en tu lista. Toca una para meterla dentro de otra o para pasar sus movimientos a otra. Cuando la guardes, sale de aquí.</p>
       ${sueltas.map((c) => botonCat(c, 1, `<br><span class="detalle">${c.tipo === 'ingreso' ? 'De ingreso' : 'De gasto'} · ${esc(plural(usos.get(c.id) || 0, 'movimiento', 'movimientos'))}</span>`)).join('')}
+    </div>` : '';
+  const archivadas = datos.categorias.filter((c) => c.archivada);
+  const tarjetaArchivadas = archivadas.length ? `
+    <div class="tarjeta">
+      <h2>Archivadas (${archivadas.length})</h2>
+      <p class="explica">Ya no salen al apuntar un movimiento nuevo, pero sus movimientos siguen en el historial. Toca una para desarchivarla.</p>
+      ${archivadas.map((c) => botonCat(c, 1, `<br><span class="detalle">${c.tipo === 'ingreso' ? 'De ingreso' : 'De gasto'} · ${esc(plural(usos.get(c.id) || 0, 'movimiento', 'movimientos'))}</span>`)).join('')}
     </div>` : '';
   const listaCuentas = datos.cuentas.map((c) => `
     <button type="button" class="cat-edit" data-accion="editar-cuenta" data-id="${esc(c.id)}">
@@ -543,6 +550,7 @@ function pintarAjustes() {
       <button type="button" class="boton-linea" data-accion="nuevo-esperado">+ Añadir ingreso esperado</button>
     </div>
     ${tarjetaSueltas}
+    ${tarjetaArchivadas}
     <div class="tarjeta">
       <h2>Categorías y presupuestos</h2>
       <p class="explica">Toca una para cambiar su nombre, su icono, dentro de cuál va o ponerle un presupuesto al mes. Toca el › de la izquierda para ver u ocultar sus subcategorías.</p>
@@ -623,7 +631,8 @@ function pintarChips(seleccion) {
   let html = '';
   let padre = null;
   for (let nivel = 0; nivel < C.NIVELES_MAX; nivel++) {
-    const opciones = C.hijasDe(datos.categorias, padre).filter((c) => c.tipo === tipo);
+    // Las archivadas no se ofrecen para apuntar, salvo la que ya tiene el movimiento que se está editando.
+    const opciones = C.hijasDe(datos.categorias, padre).filter((c) => c.tipo === tipo && (!c.archivada || c.id === ruta[nivel]?.id));
     if (!opciones.length) break;
     const arriba = ruta[nivel - 1];
     html += `<div class="chips${nivel ? ' sub' : ''}" role="radiogroup" aria-label="${esc(nivel ? `Dentro de ${arriba.nombre}` : 'Categoría')}">
@@ -639,8 +648,8 @@ function pintarChips(seleccion) {
 
 /** Categoría con la que se abre el formulario: la última usada de ese tipo o la primera principal. */
 function categoriaPorDefecto(tipo) {
-  return datos.categorias.find((c) => c.tipo === tipo && c.id === ultimaCategoria[tipo])
-    || datos.categorias.find((c) => c.tipo === tipo && !c.padre);
+  return datos.categorias.find((c) => c.tipo === tipo && !c.archivada && c.id === ultimaCategoria[tipo])
+    || datos.categorias.find((c) => c.tipo === tipo && !c.padre && !c.archivada);
 }
 
 function pintarCuentas(seleccion) {
@@ -781,6 +790,8 @@ function abrirCategoria(id = null) {
   $('#cat-presupuesto').value = c && c.presupuesto ? C.importeEditable(c.presupuesto) : '';
   $('#cat-presupuesto-campo').hidden = tipoCat() === 'ingreso';
   $('#cat-borrar').hidden = !c;
+  $('#cat-archivar').hidden = !c;
+  $('#cat-archivar').textContent = c && c.archivada ? 'Desarchivar' : 'Archivar';
   $('#cat-pasar').hidden = true;
   $('[data-accion="pasar-cat"]').hidden = !c || !datos.categorias.some((x) => x.tipo === c.tipo && x.id !== c.id);
   $('#cat-error').hidden = true;
@@ -826,6 +837,25 @@ function guardarCategoria() {
   if (!guardar()) { datos.categorias = JSON.parse(antes); datos.sinColocar = sinColocarAntes; return; }
   $('#dlg-cat').close();
   aviso('Categoría guardada');
+  pintar();
+}
+
+/** Archivar saca la categoría (y sus subcategorías) de las que se ofrecen al apuntar; sus movimientos no se tocan. */
+function archivarCategoria() {
+  const c = datos.categorias.find((x) => x.id === editandoCat);
+  if (!c) return;
+  const antes = JSON.stringify(datos.categorias);
+  const sinColocarAntes = datos.sinColocar;
+  if (c.archivada) {
+    // Al desarchivarla, también sus de arriba, para que no quede escondida dentro de una archivada.
+    for (const a of C.rutaCategoria(datos.categorias, c.id)) delete a.archivada;
+  } else {
+    for (const x of datos.categorias) if (x.id === c.id || C.descendientes(datos.categorias, c.id).has(x.id)) x.archivada = true;
+    quitarDeSinColocar(c.id);
+  }
+  if (!guardar()) { datos.categorias = JSON.parse(antes); datos.sinColocar = sinColocarAntes; return; }
+  $('#dlg-cat').close();
+  aviso(c.archivada ? 'Categoría archivada' : 'Categoría desarchivada');
   pintar();
 }
 
@@ -1055,7 +1085,7 @@ function abrirEsperado(grupo = null) {
   $('#esp-pegar-texto').value = '';
   const catSel = e ? e.categoria : null;
   $('#esp-categoria').innerHTML = '<option value="">Ninguna (solo cuenta en el total)</option>'
-    + C.ordenArbol(datos.categorias, 'ingreso').map(({ categoria: c }) => `<option value="${esc(c.id)}" ${c.id === catSel ? 'selected' : ''}>${esc(C.textoRuta(datos.categorias, c.id))}</option>`).join('');
+    + C.ordenArbol(datos.categorias, 'ingreso').filter(({ categoria: c }) => !c.archivada || c.id === catSel).map(({ categoria: c }) => `<option value="${esc(c.id)}" ${c.id === catSel ? 'selected' : ''}>${esc(C.textoRuta(datos.categorias, c.id))}</option>`).join('');
   const moneda = e ? e.moneda : datos.moneda;
   $('#esp-moneda').innerHTML = Object.keys(C.MONEDAS)
     .map((cod) => `<label><input type="radio" name="esp-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
@@ -1309,6 +1339,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'nueva-cat': abrirCategoria(); break;
     case 'borrar-cat': borrarCategoria(); break;
+    case 'archivar-cat': archivarCategoria(); break;
     case 'pasar-cat': mostrarPasar(); break;
     case 'pasar-cat-ok': pasarCategoria(); break;
     case 'organizar': abrirLista(); break;

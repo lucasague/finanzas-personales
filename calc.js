@@ -320,6 +320,7 @@ export function validarCopia(obj) {
         presupuesto: c.tipo === 'ingreso' ? null : pres,
         // Hasta la versión 4 no había subcategorías: todas son principales.
         padre: typeof c.padre === 'string' && c.padre ? c.padre : null,
+        ...(c.archivada === true ? { archivada: true } : {}),
         ...(Array.isArray(c.otrosNombres) && c.otrosNombres.some((x) => typeof x === 'string' && x.trim())
           ? { otrosNombres: c.otrosNombres.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 40)).slice(0, 30) } : {}),
       });
