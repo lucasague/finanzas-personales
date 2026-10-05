@@ -1,12 +1,13 @@
 import * as C from './calc.js';
 
-const BUILD = '6a9aae8dd0';
+const BUILD = '5b5471cc17';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
 let datos = cargar();
 let mes = C.claveMes(C.hoyISO());
 let año = añoDeHoy(); // primer mes del año que se ve en el Historial
+let rango = null; // en el Historial, { desde, hasta } si se mira un rango de meses en vez del año
 let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
@@ -115,10 +116,11 @@ function confirmar({ titulo, texto, si = 'Sí', peligro = true, lista = [], solo
 function pintar() {
   // En el Historial, el selector de la cabecera pasa de meses a años.
   const porAño = vista === 'historial';
-  $('#nombre-mes').textContent = porAño ? C.nombreAño(año) : C.nombreMes(mes);
+  const unidad = rango ? 'Periodo' : 'Año';
+  $('#nombre-mes').textContent = porAño ? (rango ? nombreRango() : C.nombreAño(año)) : C.nombreMes(mes);
   $('#nombre-mes').setAttribute('aria-label', porAño ? 'Volver al año actual' : 'Volver al mes actual');
-  $('[data-accion="mes-anterior"]').setAttribute('aria-label', porAño ? 'Año anterior' : 'Mes anterior');
-  $('[data-accion="mes-siguiente"]').setAttribute('aria-label', porAño ? 'Año siguiente' : 'Mes siguiente');
+  $('[data-accion="mes-anterior"]').setAttribute('aria-label', porAño ? `${unidad} anterior` : 'Mes anterior');
+  $('[data-accion="mes-siguiente"]').setAttribute('aria-label', porAño ? `${unidad} siguiente` : 'Mes siguiente');
   $('#selector-mes').style.visibility = vista === 'ajustes' ? 'hidden' : 'visible';
   $('#selector-mes').classList.toggle('anual', porAño);
   $('.fab').hidden = vista === 'ajustes';
@@ -290,12 +292,58 @@ function pintarMovimientos() {
   $('#vista-movimientos').innerHTML = html;
 }
 
+/** Los meses que se ven en el Historial: el rango elegido o los 12 del año. */
+function mesesDelPeriodo() {
+  return rango ? C.mesesEntre(rango.desde, rango.hasta) : C.mesesDelAño(año);
+}
+
+function nombreRango() {
+  const c = C.mesesEntre(rango.desde, rango.hasta);
+  const corto = (k) => `${C.nombreMes(k).slice(0, 3)} ${k.slice(2, 4)}`;
+  return c.length === 1 ? C.nombreMes(c[0]) : `${corto(c[0])} – ${corto(c[c.length - 1])}`;
+}
+
+/** Elegir qué meses ver en el Historial: desde/hasta, atajos y volver al año. */
+function selectorPeriodo() {
+  const claves = mesesDelPeriodo();
+  const hoy = C.claveMes(C.hoyISO());
+  const primero = datos.movimientos.reduce((min, m) => (m.fecha < min ? m.fecha : min), `${hoy}-01`);
+  const desde = [C.claveMes(primero), claves[0]].sort()[0];
+  const hasta = [C.moverMes(hoy, 12), claves[claves.length - 1]].sort().pop();
+  const hastaOpc = [];
+  for (let k = desde; k <= hasta; k = C.moverMes(k, 1)) hastaOpc.push(k);
+  const op = (sel) => hastaOpc.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(C.nombreMes(k))}</option>`).join('');
+  return `<div class="tarjeta periodo">
+    <h2>Qué meses ver</h2>
+    <div class="periodo-campos">
+      <label>Desde<select id="per-desde">${op(claves[0])}</select></label>
+      <label>Hasta<select id="per-hasta">${op(claves[claves.length - 1])}</select></label>
+    </div>
+    <div class="periodo-atajos">
+      <button type="button" class="boton-linea" data-accion="periodo-ultimos" data-n="1">Este mes</button>
+      <button type="button" class="boton-linea" data-accion="periodo-ultimos" data-n="3">3 meses</button>
+      <button type="button" class="boton-linea" data-accion="periodo-ultimos" data-n="6">6 meses</button>
+      ${rango ? '<button type="button" class="boton-linea" data-accion="periodo-año">Año completo</button>' : ''}
+    </div>
+  </div>`;
+}
+
+function moverPeriodo(sentido) {
+  if (!rango) { año = C.moverMes(año, 12 * sentido); return; }
+  const n = C.mesesEntre(rango.desde, rango.hasta).length;
+  rango = { desde: C.moverMes(rango.desde, n * sentido), hasta: C.moverMes(rango.hasta, n * sentido) };
+}
+
 function pintarHistorial() {
   const { movs, tasas } = enBase();
   const hoy = C.claveMes(C.hoyISO());
-  const r = C.resumenAño(movs, año);
-  // Los que no se pudieron pasar a la moneda principal, solo de este año.
-  const sinConvertir = datos.movimientos.filter((m) => C.enAño(C.claveMes(m.fecha), año)).length - r.n;
+  const periodo = mesesDelPeriodo();
+  const r = C.resumenAño(movs, periodo);
+  // Los que no se pudieron pasar a la moneda principal, solo de este periodo.
+  const enPeriodo = new Set(periodo);
+  const sinConvertir = datos.movimientos.filter((m) => enPeriodo.has(C.claveMes(m.fecha))).length - r.n;
+  const cabecera = selectorPeriodo();
+  const cuando = rango ? 'en este periodo' : 'en el año';
   const desgloseMonedas = (porMoneda) => {
     const monedas = Object.keys(porMoneda);
     return monedas.length > 1 || (monedas.length === 1 && monedas[0] !== datos.moneda)
@@ -303,17 +351,17 @@ function pintarHistorial() {
       : '';
   };
   if (!r.n && !sinConvertir) {
-    $('#vista-historial').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📈</span>
+    $('#vista-historial').innerHTML = cabecera + `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📈</span>
       ${datos.movimientos.length
-        ? `No hay nada apuntado en ${esc(C.nombreAño(año))}.<br>Usa las flechas de arriba para ver otro año.`
+        ? `No hay nada apuntado en ${esc(rango ? nombreRango() : C.nombreAño(año))}.<br>Usa las flechas de arriba para ver otro ${rango ? 'periodo' : 'año'}.`
         : 'Cuando apuntes movimientos, aquí verás tus ingresos y gastos del año, mes a mes.'}</div>`
-      + (datos.esperados.length ? tablaEsperado(movs, tasas, hoy) : '');
+      + (datos.esperados.length ? tablaEsperado(movs, tasas, hoy, periodo) : '');
     return;
   }
   const desgloseAño = desgloseMonedas(r.ingresosPorMoneda);
-  let html = `
+  let html = cabecera + `
     <div class="tarjeta saldo">
-      <div class="etiqueta">${r.saldo >= 0 ? 'Sobró' : 'Faltó'} en el año</div>
+      <div class="etiqueta">${r.saldo >= 0 ? 'Sobró' : 'Faltó'} ${cuando}</div>
       <div class="cifra ${r.saldo < 0 ? 'negativo' : ''}">${esc(dinero(Math.abs(r.saldo)))}</div>
       <div class="totales">
         <div><span class="t-etq">Ingresos</span><span class="t-val ingreso">${esc(dinero(r.ingresos))}</span></div>
@@ -325,8 +373,8 @@ function pintarHistorial() {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no se cuentan porque falta su tipo de cambio.</p>`;
   }
   // Los presupuestos son al mes: en el año, cada barra es relativa al mayor gasto.
-  const filas = C.gastoPorCategoria(movs, C.mesesDelAño(año), datos.categorias, { conPresupuesto: false });
-  if (filas.length) html += `<div class="tarjeta"><h2>¿En qué se fue en el año?</h2>${pistaDesglose(filas)}${barrasCategorias(filas)}</div>`;
+  const filas = C.gastoPorCategoria(movs, periodo, datos.categorias, { conPresupuesto: false });
+  if (filas.length) html += `<div class="tarjeta"><h2>¿En qué se fue ${rango ? 'en estos meses' : 'en el año'}?</h2>${pistaDesglose(filas)}${barrasCategorias(filas)}</div>`;
 
   const maximo = Math.max(1, ...r.meses.map((f) => Math.max(f.ingresos, f.gastos)));
   const pct = (v) => Math.round((v / maximo) * 100);
@@ -347,8 +395,8 @@ function pintarHistorial() {
       </div>`;
   }
   html += `</div>`;
-  html += tablaEsperado(movs, tasas, hoy);
-  const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, C.moverMes(año, 11), 12);
+  html += tablaEsperado(movs, tasas, hoy, periodo);
+  const tipos = C.tiposDeCambioPorMes(tasas, datos.moneda, periodo[periodo.length - 1], periodo.length);
   if (tipos.length) {
     html += `<div class="tarjeta"><h2>Tipo de cambio de cada mes</h2>
       <p class="explica">Sale de lo que de verdad te cobraron en tus movimientos en otra moneda.</p>`;
@@ -367,8 +415,8 @@ function pintarHistorial() {
  * Esperado frente a real de cada mes del año, en el Historial: una tabla con todo y otra por cada fuente que tiene
  * categoría (en su moneda).
  */
-function tablaEsperado(movs, tasas, hoy) {
-  const r = C.esperadoVsReal(movs, datos.esperados, año, datos.moneda, tasas, datos.esperadosMes);
+function tablaEsperado(movs, tasas, hoy, periodo) {
+  const r = C.esperadoVsReal(movs, datos.esperados, periodo, datos.moneda, tasas, datos.esperadosMes);
   if (!r.hayAlguno) {
     return `<div class="tarjeta"><h2>Esperado y real</h2>
       <p class="explica">Pon cuánto esperas ingresar al mes y aquí lo verás junto a lo que de verdad entró, mes a mes.</p>
@@ -378,7 +426,7 @@ function tablaEsperado(movs, tasas, hoy) {
     'Todos tus ingresos frente a todo lo que esperabas. Los meses que aún no han llegado solo muestran lo esperado. Para poner otra cantidad en un mes, toca el ingreso en Ajustes.');
   const grupos = [...new Set(C.lineasEsperadas(datos.esperados, hoy).map((e) => e.grupo))];
   for (const g of grupos) {
-    const rl = C.esperadoVsRealDeLinea(datos.movimientos, datos.esperados, g, año, tasas, datos.esperadosMes, datos.categorias, hoy);
+    const rl = C.esperadoVsRealDeLinea(datos.movimientos, datos.esperados, g, periodo, tasas, datos.esperadosMes, datos.categorias, hoy);
     if (!rl || !rl.hayAlguno) continue;
     html += tablaEsperadoReal(`Esperado y real: ${rl.nombre}`, rl.meses, hoy, rl.moneda,
       `Solo lo apuntado en ${C.textoRuta(datos.categorias, rl.categoria) || 'su categoría'}, en ${nombreCorto[rl.moneda] || rl.moneda}.`);
@@ -1277,9 +1325,17 @@ document.addEventListener('click', (e) => {
     case 'esp-rellenar': rellenarMesesEsperado(); break;
     case 'cerrar': el.closest('dialog').close(); break;
     // En el Historial las flechas mueven de año en año.
-    case 'mes-anterior': if (vista === 'historial') año = C.moverMes(año, -12); else mes = C.moverMes(mes, -1); pintar(); break;
-    case 'mes-siguiente': if (vista === 'historial') año = C.moverMes(año, 12); else mes = C.moverMes(mes, 1); pintar(); break;
-    case 'mes-hoy': if (vista === 'historial') año = añoDeHoy(); else mes = C.claveMes(C.hoyISO()); pintar(); break;
+    // Con un rango de meses, las flechas lo mueven de su propia longitud.
+    case 'mes-anterior': if (vista === 'historial') moverPeriodo(-1); else mes = C.moverMes(mes, -1); pintar(); break;
+    case 'mes-siguiente': if (vista === 'historial') moverPeriodo(1); else mes = C.moverMes(mes, 1); pintar(); break;
+    case 'mes-hoy': if (vista === 'historial') { rango = null; año = añoDeHoy(); } else mes = C.claveMes(C.hoyISO()); pintar(); break;
+    case 'periodo-ultimos': {
+      const hoy = C.claveMes(C.hoyISO());
+      rango = { desde: C.moverMes(hoy, 1 - Number(el.dataset.n)), hasta: hoy };
+      pintar();
+      break;
+    }
+    case 'periodo-año': rango = null; pintar(); break;
     case 'exportar': exportar(); break;
     case 'importar': $('#archivo-importar').value = ''; $('#archivo-importar').click(); break;
     case 'wallet': $('#archivo-wallet').value = ''; $('#archivo-wallet').click(); break;
@@ -1287,6 +1343,15 @@ document.addEventListener('click', (e) => {
     case 'actualizar': actualizarApp(); break;
     default: break;
   }
+});
+
+// Los selectores "Desde/Hasta" del Historial se pintan con la vista, así que se escuchan en su contenedor.
+$('#vista-historial').addEventListener('change', (e) => {
+  if (e.target.id !== 'per-desde' && e.target.id !== 'per-hasta') return;
+  const desde = $('#per-desde').value;
+  const hasta = $('#per-hasta').value;
+  rango = desde <= hasta ? { desde, hasta } : { desde: hasta, hasta: desde };
+  pintar();
 });
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });

@@ -372,3 +372,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 #esp-pegar-bloque textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie-2); font: inherit; margin-bottom: 6px; }
 #esp-pegar-bloque { margin-bottom: 12px; }
 #esp-pegar-bloque[hidden] { display: none; }
+
+/* Historial: elegir qué meses ver */
+.periodo-campos { display: flex; gap: 10px; }
+.periodo-campos label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--texto-2, inherit); }
+.periodo-campos select { width: 100%; }
+.periodo-atajos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }

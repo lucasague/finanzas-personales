@@ -170,6 +170,18 @@ export function mesesDelAño(desde) {
   return Array.from({ length: 12 }, (_, i) => moverMes(desde, i));
 }
 
+/** Los meses de `desde` a `hasta` (ambos incluidos, en orden; si vienen al revés se les da la vuelta), 36 como mucho. */
+export function mesesEntre(desde, hasta) {
+  if (desde > hasta) [desde, hasta] = [hasta, desde];
+  const n = Math.min(36, distanciaMeses(hasta, desde) + 1);
+  return Array.from({ length: n }, (_, i) => moverMes(desde, i));
+}
+
+/** Un periodo es un año (clave de su primer mes) o ya una lista de meses. */
+function clavesDelPeriodo(periodo) {
+  return Array.isArray(periodo) ? periodo : mesesDelAño(periodo);
+}
+
 /** "Sep 2026 – Ago 2027"; si el año empieza en enero, "Ene – Dic 2026". */
 export function nombreAño(desde) {
   const hasta = moverMes(desde, 11);
@@ -496,7 +508,7 @@ function totalesPorMes(movs, claves) {
  * del año. Recibe movimientos ya pasados por enMonedaBase.
  */
 export function resumenAño(movs, desde) {
-  const meses = totalesPorMes(movs, mesesDelAño(desde));
+  const meses = totalesPorMes(movs, clavesDelPeriodo(desde));
   const total = { ingresos: 0, gastos: 0, saldo: 0, ingresosPorMoneda: {}, n: 0 };
   for (const f of meses) {
     total.ingresos += f.ingresos;
@@ -710,7 +722,7 @@ export function esperadoDelMes(esperados, clave, base, tasas, esperadosMes = [])
  * movimientos ya pasados por enMonedaBase.
  */
 export function esperadoVsReal(movs, esperados, desde, base, tasas, esperadosMes = []) {
-  const meses = totalesPorMes(movs, mesesDelAño(desde)).map((f) => {
+  const meses = totalesPorMes(movs, clavesDelPeriodo(desde)).map((f) => {
     const e = esperadoDelMes(esperados, f.clave, base, tasas, esperadosMes);
     return { clave: f.clave, esperado: e.total, real: f.ingresos, diferencia: f.ingresos - e.total, sinTasa: e.sinTasa, hayEsperado: e.lineas.length > 0 };
   });
@@ -747,7 +759,7 @@ export function esperadoVsRealDeLinea(movimientos, esperados, grupo, desde, tasa
   if (!linea || !linea.categoria) return null;
   const moneda = linea.moneda;
   const otras = lineasEsperadas(esperados, hoy).filter((e) => e.grupo !== grupo).map((e) => e.categoria);
-  const meses = mesesDelAño(desde).map((clave) => {
+  const meses = clavesDelPeriodo(desde).map((clave) => {
     const tramo = (esperados || []).find((e) => e.grupo === grupo && cubre(e, clave));
     const real = realDeCategoria(movimientos, clave, categorias, linea.categoria, moneda, tasas, otras);
     if (!tramo) return { clave, esperado: 0, real: real.total, diferencia: 0, sinTasa: real.sinTasa, hayEsperado: false };
