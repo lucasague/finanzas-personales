@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="904e244ba4">
+  <meta name="version" content="1e5a14feb3">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -36,7 +36,7 @@
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.6 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.15 —tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -123,6 +123,7 @@
       </label>
       <button type="button" class="boton-linea" data-accion="ver-movs-cat" id="cat-ver-movs" hidden>Ver sus movimientos…</button>
       <button type="button" class="boton-linea" data-accion="pasar-cat" hidden>Pasar sus movimientos a otra…</button>
+      <button type="button" class="boton-linea" data-accion="mover-a-cat" id="cat-mover-aqui" hidden>Traer aquí movimientos por texto…</button>
       <div id="cat-pasar" class="bloque-base" hidden>
         <label class="campo">
           <span>¿A qué categoría pasan sus movimientos? Después esta se borra.</span>
@@ -150,6 +151,28 @@
     </div>
     <p class="explica">Toca uno para cambiarle la categoría. Al guardar, sale de esta lista.</p>
     <div id="movs-cat-lista"></div>
+  </dialog>
+
+  <!-- Mover movimientos por texto: los que dicen algo en la nota, a una categoría -->
+  <dialog id="dlg-mover" class="hoja" aria-labelledby="dlg-mover-titulo">
+    <div class="hoja-cabecera">
+      <h2 id="dlg-mover-titulo">Mover movimientos por texto</h2>
+      <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <label class="campo">
+      <span>1. Qué dicen. Una palabra o frase por línea; vale con que diga una de ellas. Da igual mayúsculas y tildes.</span>
+      <textarea id="mover-texto" class="texto-lista corto" rows="3" autocomplete="off" spellcheck="false"
+        placeholder="Por ejemplo:&#10;supermercado&#10;gasolina"></textarea>
+    </label>
+    <label class="campo">
+      <span>2. A qué categoría van</span>
+      <select id="mover-destino"></select>
+    </label>
+    <div id="mover-resultado"></div>
+    <p class="error" id="mover-error" hidden></p>
+    <div class="acciones">
+      <button type="button" class="boton principal" data-accion="mover-ok" id="mover-ok" disabled>Mover</button>
+    </div>
   </dialog>
 
   <dialog id="dlg-lista" class="hoja" aria-labelledby="dlg-lista-titulo">

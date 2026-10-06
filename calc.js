@@ -1358,3 +1358,75 @@ export function pasarMovimientos(categorias, movimientos, origen, destino) {
     ? { ...c, otrosNombres: [...new Set([...(c.otrosNombres || []), o.nombre, ...(o.otrosNombres || [])])].slice(0, 30) } : c));
   return { categorias: cats, movimientos: movs, n };
 }
+
+// ---------- Mover movimientos por texto ----------
+
+/**
+ * Lo que se busca en "Mover movimientos por texto": una frase por línea (o separadas por comas), sin mayúsculas,
+ * sin tildes y sin repetir. Las comillas que se peguen alrededor ("clase", «clase») no cuentan.
+ */
+export function frasesDeBusqueda(texto) {
+  const res = [];
+  for (const trozo of String(texto ?? '').split(/[\n,;]/)) {
+    const f = nombreComparable(trozo.replace(/["'«»“”‘’]/g, ' '));
+    if (f && !res.includes(f)) res.push(f);
+  }
+  return res.slice(0, 20);
+}
+
+/**
+ * ¿El texto dice la frase? Tienen que estar todas sus palabras, en cualquier orden y aunque haya otras en medio
+ * ("clase canto" vale para "Clase de canto"), sin distinguir mayúsculas ni tildes. Cada palabra puede ser parte de
+ * otra más larga ("cant" vale para "canto").
+ */
+export function textoDiceFrase(texto, frase) {
+  const t = nombreComparable(texto);
+  const palabras = nombreComparable(frase).split(' ').filter(Boolean);
+  return palabras.length > 0 && palabras.every((p) => t.includes(p));
+}
+
+/**
+ * Movimientos cuya nota dice alguna de las frases (basta una). Devuelve [{ movimiento, frase }] con la primera frase
+ * que coincide, más recientes primero. No toca lo que recibe.
+ */
+export function buscarPorTexto(movimientos, frases) {
+  const res = [];
+  if (!frases.length) return res;
+  for (const m of movimientos) {
+    const frase = frases.find((f) => textoDiceFrase(m.nota || '', f));
+    if (frase) res.push({ movimiento: m, frase });
+  }
+  return res.sort((x, y) => y.movimiento.fecha.localeCompare(x.movimiento.fecha)
+    || ((y.movimiento.creado || 0) - (x.movimiento.creado || 0)));
+}
+
+/**
+ * Plan para pasar a la categoría `destino` lo que encuentra buscarPorTexto: solo los del mismo tipo que la categoría
+ * (un ingreso no va a una de gasto) y que no estén ya en ella. Devuelve { aMover, yaEstan, otroTipo }.
+ */
+export function planMoverPorTexto(movimientos, categorias, frases, destino) {
+  const encontrados = buscarPorTexto(movimientos, frases);
+  const cat = categorias.find((c) => c.id === destino);
+  if (!cat) return { aMover: encontrados, yaEstan: [], otroTipo: [] };
+  const aMover = [];
+  const yaEstan = [];
+  const otroTipo = [];
+  for (const e of encontrados) {
+    if (e.movimiento.categoria === destino) yaEstan.push(e);
+    else if (e.movimiento.tipo !== cat.tipo) otroTipo.push(e);
+    else aMover.push(e);
+  }
+  return { aMover, yaEstan, otroTipo };
+}
+
+/** Pone la categoría `destino` a los movimientos con esos ids. No toca lo que recibe: devuelve { movimientos, n }. */
+export function moverMovimientos(movimientos, ids, destino) {
+  const quiero = new Set(ids);
+  let n = 0;
+  const movs = movimientos.map((m) => {
+    if (!quiero.has(m.id) || m.categoria === destino) return m;
+    n++;
+    return { ...m, categoria: destino };
+  });
+  return { movimientos: movs, n };
+}

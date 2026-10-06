@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '904e244ba4';
+const BUILD = '1e5a14feb3';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -562,6 +562,11 @@ function pintarAjustes() {
       <button type="button" class="boton-linea" data-accion="nueva-cat">+ Añadir categoría</button>
     </div>
     <div class="tarjeta">
+      <h2>Mover movimientos por texto</h2>
+      <p class="explica">Para pasar de golpe a una categoría todos los movimientos cuya nota dice algo (una palabra, un nombre, «clase de…»). Escribes qué buscar, eliges la categoría y antes de mover nada ves cuáles son.</p>
+      <button type="button" class="boton" data-accion="mover-texto">Mover movimientos por texto</button>
+    </div>
+    <div class="tarjeta">
       <h2>Organizar con una lista</h2>
       <p class="explica">Si ya tienes tus categorías escritas (por ejemplo, en un mensaje), pégalas y la app las crea y las ordena. Las que ya tienes con el mismo nombre se reutilizan con sus movimientos. Si una que ya tienes se llama distinto, ponla entre paréntesis detrás de la de tu lista y se junta en ella con sus movimientos, por ejemplo: -Golosinas (Caprichos). Antes de cambiar nada te enseño cómo queda. Ningún movimiento se borra.</p>
       <button type="button" class="boton" data-accion="organizar">Organizar con una lista</button>
@@ -792,6 +797,7 @@ function abrirCategoria(id = null) {
   $('#cat-archivar').textContent = c && c.archivada ? 'Desarchivar' : 'Archivar';
   $('#cat-pasar').hidden = true;
   $('[data-accion="pasar-cat"]').hidden = !c || !datos.categorias.some((x) => x.tipo === c.tipo && x.id !== c.id);
+  $('#cat-mover-aqui').hidden = !c || c.archivada;
   $('#cat-error').hidden = true;
   $('#dlg-cat').showModal();
   if (!c) setTimeout(() => $('#cat-nombre').focus(), 50);
@@ -950,6 +956,95 @@ function olvidarCategoriasQuitadas() {
 }
 
 const quitarDeSinColocar = (id) => { datos.sinColocar = (datos.sinColocar || []).filter((x) => x !== id); };
+
+// ---------- Mover movimientos por texto ----------
+
+let desmarcados = new Set(); // en la vista previa, los que la persona ha quitado tocándolos
+let planMover = null; // lo que se movería con lo escrito y la categoría elegida
+
+/** Abre "Mover movimientos por texto"; desde una categoría, ya con ella elegida como destino. */
+function abrirMover(destino = null) {
+  desmarcados = new Set();
+  const opcion = (f) => `<option value="${esc(f.categoria.id)}" ${f.categoria.id === destino ? 'selected' : ''}>${esc(C.textoRuta(datos.categorias, f.categoria.id))}</option>`;
+  const grupo = (tipo, titulo) => {
+    const filas = C.ordenArbol(datos.categorias, tipo).filter((f) => !f.categoria.archivada || f.categoria.id === destino);
+    return filas.length ? `<optgroup label="${titulo}">${filas.map(opcion).join('')}</optgroup>` : '';
+  };
+  $('#mover-destino').innerHTML = `<option value="">Elige una…</option>${grupo('gasto', 'Gastos')}${grupo('ingreso', 'Ingresos')}`;
+  $('#mover-texto').value = '';
+  $('#mover-error').hidden = true;
+  pintarMover();
+  $('#dlg-mover').showModal();
+  setTimeout(() => $('#mover-texto').focus(), 50);
+}
+
+/** Vista previa: cuántos y cuáles se moverían, cada uno con su casilla para quitarlo. */
+function pintarMover() {
+  const frases = C.frasesDeBusqueda($('#mover-texto').value);
+  const destino = $('#mover-destino').value || null;
+  const res = $('#mover-resultado');
+  const boton = $('#mover-ok');
+  planMover = null;
+  boton.disabled = true;
+  boton.textContent = 'Mover';
+  if (!frases.length) { res.innerHTML = ''; return; }
+  const p = C.planMoverPorTexto(datos.movimientos, datos.categorias, frases, destino);
+  const total = p.aMover.length + p.yaEstan.length + p.otroTipo.length;
+  if (!total) {
+    res.innerHTML = `<p class="explica">Ningún movimiento dice ${frases.map((f) => `«${esc(f)}»`).join(' ni ')} en la nota. Si lo que buscas es una categoría con ese nombre, ábrela en Ajustes y usa «Pasar sus movimientos a otra…».</p>`;
+    return;
+  }
+  const notas = [];
+  if (p.yaEstan.length) notas.push(`${plural(p.yaEstan.length, 'ya está', 'ya están')} en esa categoría.`);
+  if (p.otroTipo.length) {
+    const tipoDestino = categoria(destino).tipo;
+    notas.push(`${p.otroTipo.length === 1 ? 'Hay 1 de' : `Hay ${p.otroTipo.length} de`} ${tipoDestino === 'gasto' ? 'ingreso' : 'gasto'} que no se ${p.otroTipo.length === 1 ? 'mueve' : 'mueven'}: la categoría es de ${tipoDestino === 'gasto' ? 'gastos' : 'ingresos'}.`);
+  }
+  const fila = ({ movimiento: m }) => {
+    const c = categoria(m.categoria);
+    const signo = m.tipo === 'ingreso' ? '+' : '−';
+    return `<li><label class="mov">
+      <input type="checkbox" data-id="${esc(m.id)}" ${desmarcados.has(m.id) ? '' : 'checked'}>
+      <span class="texto">
+        <span class="titulo">${esc(m.nota)}</span>
+        <span class="detalle">${esc(C.fechaDMA(m.fecha))} · ahora en ${esc(c.id ? rutaDe(c.id) : c.nombre)}</span>
+      </span>
+      <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, m.moneda || datos.moneda))}</span>
+    </label></li>`;
+  };
+  if (!destino) {
+    res.innerHTML = `<p class="explica"><strong>${plural(total, 'movimiento dice', 'movimientos dicen')} eso.</strong> Elige arriba a qué categoría van.</p>`;
+    return;
+  }
+  planMover = { destino, ids: p.aMover.map((e) => e.movimiento.id) };
+  res.innerHTML = `
+    <p class="explica"><strong>${p.aMover.length ? `${plural(p.aMover.length, 'movimiento dice', 'movimientos dicen')} eso.` : 'No hay ninguno que mover.'}</strong>
+      ${p.aMover.length ? 'Revísalos: si alguno no va, tócalo para quitarle la marca.' : ''} ${notas.map(esc).join(' ')}</p>
+    ${p.aMover.length ? `<ul class="lista mover-lista">${p.aMover.map(fila).join('')}</ul>` : ''}`;
+  contarMarcados();
+}
+
+/** El botón dice cuántos se moverán (los marcados). */
+function contarMarcados() {
+  const boton = $('#mover-ok');
+  const n = planMover ? planMover.ids.filter((id) => !desmarcados.has(id)).length : 0;
+  boton.disabled = !n;
+  boton.textContent = n ? `Mover ${plural(n, 'movimiento', 'movimientos')}` : 'Mover';
+}
+
+function moverPorTexto() {
+  const ids = planMover ? planMover.ids.filter((id) => !desmarcados.has(id)) : [];
+  if (!ids.length) return;
+  const { destino } = planMover;
+  const antes = datos.movimientos;
+  const r = C.moverMovimientos(datos.movimientos, ids, destino);
+  datos.movimientos = r.movimientos;
+  if (!guardar()) { datos.movimientos = antes; return; }
+  planMover = null;
+  $('#dlg-mover').close();
+  aviso(`${plural(r.n, 'movimiento movido', 'movimientos movidos')} a «${rutaDe(destino)}»`);
+  pintar();
+}
 
 // ---------- Organizar con una lista ----------
 
@@ -1365,6 +1460,9 @@ document.addEventListener('click', (e) => {
     case 'editar-mov-de-cat': $('#dlg-movs-cat').close(); abrirMovimiento(el.dataset.id); break;
     case 'pasar-cat': mostrarPasar(); break;
     case 'pasar-cat-ok': pasarCategoria(); break;
+    case 'mover-texto': abrirMover(); break;
+    case 'mover-a-cat': { const id = editandoCat; $('#dlg-cat').close(); abrirMover(id); break; }
+    case 'mover-ok': moverPorTexto(); break;
     case 'organizar': abrirLista(); break;
     case 'lista-ver': verLista(); break;
     case 'lista-cancelar': cancelarLista(); break;
@@ -1419,6 +1517,16 @@ $('#dlg-mov').addEventListener('close', () => {
 });
 $('#dlg-movs-cat').addEventListener('close', () => {
   setTimeout(() => { if (!$('#dlg-mov').open && !$('#dlg-movs-cat').open) listaDeCat = null; }, 0);
+});
+
+// "Mover por texto": la vista previa cambia según se escribe, se elige la categoría o se quita una marca.
+$('#mover-texto').addEventListener('input', pintarMover);
+$('#mover-destino').addEventListener('change', pintarMover);
+$('#mover-resultado').addEventListener('change', (e) => {
+  const id = e.target.dataset && e.target.dataset.id;
+  if (!id) return;
+  if (e.target.checked) desmarcados.delete(id); else desmarcados.add(id);
+  contarMarcados();
 });
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
