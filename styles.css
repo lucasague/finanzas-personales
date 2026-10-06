@@ -385,3 +385,4 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .mover-lista .mov input { width: 22px; height: 22px; flex: none; accent-color: var(--acento); margin: 0; }
 .mover-lista .mov:has(input:not(:checked)) { opacity: .55; }
 .boton:disabled { opacity: .5; }
+.sel-lista .mov:has(input:not(:checked)) { opacity: 1; }

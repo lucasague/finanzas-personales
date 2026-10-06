@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '1e5a14feb3';
+const BUILD = 'b8f3a4683f';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -262,7 +262,7 @@ function pintarMovimientos() {
     return;
   }
   const tasas = C.tasasImplicitas(datos.movimientos);
-  let html = '';
+  let html = '<button type="button" class="boton-linea" data-accion="sel-abrir-mes">Seleccionar varios…</button>';
   let diaActual = '';
   for (const m of lista) {
     if (m.fecha !== diaActual) {
@@ -1046,6 +1046,73 @@ function moverPorTexto() {
   pintar();
 }
 
+// ---------- Seleccionar varios movimientos ----------
+
+let selIds = []; // los movimientos que se ofrecen en la hoja, en orden
+let selMarcados = new Set();
+let selVuelta = null; // categoría cuya lista se reabre al acabar (null: venía de Movimientos)
+
+/** Abre la hoja con los movimientos del mes (origen null) o de una categoría. */
+function abrirSeleccion(origen = null) {
+  selVuelta = origen;
+  const lista = (origen ? datos.movimientos.filter((m) => m.categoria === origen) : C.movimientosDelMes(datos.movimientos, mes))
+    .slice().sort((x, y) => y.fecha.localeCompare(x.fecha) || ((y.creado || 0) - (x.creado || 0)));
+  selIds = lista.map((m) => m.id);
+  selMarcados = new Set();
+  const fila = (m) => {
+    const c = categoria(m.categoria);
+    const signo = m.tipo === 'ingreso' ? '+' : '−';
+    return `<li><label class="mov">
+      <input type="checkbox" data-id="${esc(m.id)}">
+      <span class="texto">
+        <span class="titulo">${esc(m.nota || (m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto'))}</span>
+        <span class="detalle">${esc(C.fechaDMA(m.fecha))} · ${esc(c.id ? rutaDe(c.id) : c.nombre)}</span>
+      </span>
+      <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, m.moneda || datos.moneda))}</span>
+    </label></li>`;
+  };
+  $('#sel-lista').innerHTML = lista.length ? `<ul class="lista mover-lista sel-lista">${lista.map(fila).join('')}</ul>` : '<p class="subtitulo">No hay movimientos.</p>';
+  const opcion = (f) => `<option value="${esc(f.categoria.id)}">${esc(C.textoRuta(datos.categorias, f.categoria.id))}</option>`;
+  const grupo = (tipo, titulo) => {
+    const filas = C.ordenArbol(datos.categorias, tipo).filter((f) => !f.categoria.archivada);
+    return filas.length ? `<optgroup label="${titulo}">${filas.map(opcion).join('')}</optgroup>` : '';
+  };
+  $('#sel-destino').innerHTML = `<option value="">Elige una…</option>${grupo('gasto', 'Gastos')}${grupo('ingreso', 'Ingresos')}`;
+  $('#sel-error').hidden = true;
+  contarSeleccion();
+  if (!$('#dlg-sel').open) $('#dlg-sel').showModal();
+}
+
+function contarSeleccion() {
+  const n = selMarcados.size;
+  const boton = $('#sel-ok');
+  boton.disabled = !n || !$('#sel-destino').value;
+  boton.textContent = n ? `Mover ${plural(n, 'movimiento', 'movimientos')}` : 'Mover';
+  $('#sel-todos').textContent = n && n === selIds.length ? 'Quitar todas las marcas' : 'Marcar todos';
+  $('#sel-todos').hidden = !selIds.length;
+}
+
+function moverSeleccion() {
+  const destino = $('#sel-destino').value;
+  if (!destino || !selMarcados.size) return;
+  const tipoDestino = categoria(destino).tipo;
+  const ids = datos.movimientos.filter((m) => selMarcados.has(m.id) && m.tipo === tipoDestino).map((m) => m.id);
+  const otroTipo = selMarcados.size - ids.length;
+  if (!ids.length) {
+    $('#sel-error').textContent = `Esa categoría es de ${tipoDestino === 'gasto' ? 'gastos' : 'ingresos'} y lo que marcaste es de ${tipoDestino === 'gasto' ? 'ingresos' : 'gastos'}. Elige otra.`;
+    $('#sel-error').hidden = false;
+    return;
+  }
+  const antes = datos.movimientos;
+  const r = C.moverMovimientos(datos.movimientos, ids, destino);
+  datos.movimientos = r.movimientos;
+  if (!guardar()) { datos.movimientos = antes; return; }
+  $('#dlg-sel').close();
+  aviso(`${plural(r.n, 'movimiento movido', 'movimientos movidos')} a «${rutaDe(destino)}»${otroTipo ? `. ${plural(otroTipo, 'se quedó', 'se quedaron')} donde estaba${otroTipo === 1 ? '' : 'n'}: era${otroTipo === 1 ? '' : 'n'} de otro tipo` : ''}`);
+  if (selVuelta) verMovimientosDeCat(selVuelta);
+  pintar();
+}
+
 // ---------- Organizar con una lista ----------
 
 let planLista = null; // lo que se va a hacer, calculado en "Ver cómo queda"
@@ -1463,6 +1530,16 @@ document.addEventListener('click', (e) => {
     case 'mover-texto': abrirMover(); break;
     case 'mover-a-cat': { const id = editandoCat; $('#dlg-cat').close(); abrirMover(id); break; }
     case 'mover-ok': moverPorTexto(); break;
+    case 'sel-abrir-mes': abrirSeleccion(); break;
+    case 'sel-abrir-cat': { const id = listaDeCat; $('#dlg-movs-cat').close(); abrirSeleccion(id); break; }
+    case 'sel-todos': {
+      const todos = selMarcados.size !== selIds.length;
+      selMarcados = new Set(todos ? selIds : []);
+      for (const i of document.querySelectorAll('#sel-lista input')) i.checked = todos;
+      contarSeleccion();
+      break;
+    }
+    case 'sel-ok': moverSeleccion(); break;
     case 'organizar': abrirLista(); break;
     case 'lista-ver': verLista(); break;
     case 'lista-cancelar': cancelarLista(); break;
@@ -1528,6 +1605,15 @@ $('#mover-resultado').addEventListener('change', (e) => {
   if (e.target.checked) desmarcados.delete(id); else desmarcados.add(id);
   contarMarcados();
 });
+
+// "Seleccionar varios": cada casilla cuenta y el botón se activa con al menos una y la categoría elegida.
+$('#sel-lista').addEventListener('change', (e) => {
+  const id = e.target.dataset && e.target.dataset.id;
+  if (!id) return;
+  if (e.target.checked) selMarcados.add(id); else selMarcados.delete(id);
+  contarSeleccion();
+});
+$('#sel-destino').addEventListener('change', () => { $('#sel-error').hidden = true; contarSeleccion(); });
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });

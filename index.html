@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="1e5a14feb3">
+  <meta name="version" content="b8f3a4683f">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -36,7 +36,7 @@
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.15 —tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.16 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -150,7 +150,27 @@
       <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
     </div>
     <p class="explica">Toca uno para cambiarle la categoría. Al guardar, sale de esta lista.</p>
+    <button type="button" class="boton-linea" data-accion="sel-abrir-cat">Seleccionar varios…</button>
     <div id="movs-cat-lista"></div>
+  </dialog>
+
+  <!-- Seleccionar varios movimientos y mandarlos de golpe a una categoría -->
+  <dialog id="dlg-sel" class="hoja" aria-labelledby="dlg-sel-titulo">
+    <div class="hoja-cabecera">
+      <h2 id="dlg-sel-titulo">Seleccionar varios</h2>
+      <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <p class="explica">1. Marca los movimientos que quieras.</p>
+    <button type="button" class="boton-linea" data-accion="sel-todos" id="sel-todos">Marcar todos</button>
+    <div id="sel-lista"></div>
+    <label class="campo">
+      <span>2. A qué categoría van</span>
+      <select id="sel-destino"></select>
+    </label>
+    <p class="error" id="sel-error" hidden></p>
+    <div class="acciones">
+      <button type="button" class="boton principal" data-accion="sel-ok" id="sel-ok" disabled>Mover</button>
+    </div>
   </dialog>
 
   <!-- Mover movimientos por texto: los que dicen algo en la nota, a una categoría -->
