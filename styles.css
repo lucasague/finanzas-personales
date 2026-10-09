@@ -12,6 +12,7 @@
   --gasto: #b4232c;
   --aviso: #b45309;
   --barra-fondo: #e3e9e7;
+  --cumple: #db2777;
   --sombra: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .06);
   --radio: 14px;
   color-scheme: light;
@@ -32,6 +33,7 @@
     --gasto: #f87171;
     --aviso: #fbbf24;
     --barra-fondo: #22322e;
+    --cumple: #f472b6;
     --sombra: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .3);
     color-scheme: dark;
   }
@@ -208,14 +210,16 @@ button.plegar.abierta { transform: rotate(90deg); }
 .fab:active { transform: scale(.96); }
 .barra {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   background: var(--superficie); border-top: 1px solid var(--borde);
   padding-bottom: env(safe-area-inset-bottom);
 }
 .barra button {
   min-height: 62px; background: none; border: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  font-size: .78rem; color: var(--texto-suave);
+  /* Seis secciones: la letra se ajusta al ancho para que "Movimientos" quepa en un móvil estrecho. */
+  font-size: clamp(.6rem, 2.7vw, .78rem); color: var(--texto-suave);
+  padding: 0 1px; white-space: nowrap; overflow: hidden; min-width: 0;
 }
 .barra button span { font-size: 1.25rem; line-height: 1; }
 .barra button[aria-current="page"] { color: var(--acento); font-weight: 700; }
@@ -386,3 +390,51 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .mover-lista .mov:has(input:not(:checked)) { opacity: .55; }
 .boton:disabled { opacity: .5; }
 .sel-lista .mov:has(input:not(:checked)) { opacity: 1; }
+
+/* Calendario */
+.cal-rejilla { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.cal-sem { text-align: center; font-size: .75rem; color: var(--texto-suave); font-weight: 600; padding-bottom: 4px; }
+.cal-dia {
+  min-height: 46px; padding: 4px 0 2px; border: 0; border-radius: 10px; background: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.cal-dia:active { background: var(--superficie-2); }
+.cal-num { width: 28px; height: 28px; line-height: 28px; border-radius: 50%; text-align: center; font-size: .95rem; }
+.cal-dia.hoy .cal-num { color: var(--acento); font-weight: 800; box-shadow: inset 0 0 0 2px var(--acento); }
+.cal-dia[aria-pressed="true"] .cal-num { background: var(--acento); color: var(--acento-texto); font-weight: 700; }
+.cal-puntos { display: flex; gap: 3px; height: 6px; }
+.punto { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--acento); }
+.punto.cumple { background: var(--cumple); }
+.punto.importante { background: var(--aviso); }
+.cal-leyenda { margin: 10px 0 0; flex-wrap: wrap; }
+.cal-leyenda .punto { margin-right: 4px; vertical-align: 1px; }
+.cat-edit.evento .cuando { font-size: .82rem; color: var(--acento); font-weight: 600; white-space: nowrap; }
+.cat-edit.evento .texto { min-width: 0; overflow-wrap: anywhere; }
+.casilla { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 8px; cursor: pointer; }
+.casilla input { width: 22px; height: 22px; margin: 0; accent-color: var(--acento); flex: none; }
+.segmentado.con-icono span { flex-direction: column; gap: 2px; min-height: 58px; font-size: .85rem; }
+.segmentado.con-icono b { font-size: 1.25rem; font-weight: normal; line-height: 1; }
+
+/* Lista de compra */
+.compra-form { display: flex; gap: 8px; margin-bottom: 14px; }
+.compra-form input {
+  flex: 1; min-width: 0; min-height: 48px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--borde); background: var(--superficie);
+}
+.compra-form .boton { flex: none; }
+.compra-lista { list-style: none; margin: 0; padding: 0; }
+.articulo { display: flex; align-items: center; border-top: 1px solid var(--borde); }
+.articulo:first-child { border-top: 0; }
+.art-marcar {
+  flex: 1; min-width: 0; min-height: 50px; display: flex; align-items: center; gap: 12px;
+  background: none; border: 0; padding: 4px 2px; text-align: left;
+}
+.caja {
+  flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--borde);
+  display: inline-flex; align-items: center; justify-content: center; font-size: .9rem; font-weight: 800;
+}
+.art-texto { overflow-wrap: anywhere; }
+.articulo.hecho .caja { background: var(--acento); border-color: var(--acento); color: var(--acento-texto); }
+.articulo.hecho .art-texto { text-decoration: line-through; color: var(--texto-suave); }
+.art-borrar { font-size: 1rem; flex: none; }

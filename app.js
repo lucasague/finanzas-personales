@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'b8f3a4683f';
+const BUILD = '82eeaf59ca';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -18,6 +18,11 @@ let ultimaMoneda = null;
 let ultimaCuenta = null;
 let catAbiertas = new Set(); // en Ajustes, las categorías con las subcategorías a la vista
 let baseTocada = false; // si la persona ha escrito a mano lo que le costó en la moneda principal
+let diaSel = null; // en el Calendario, el día tocado (fecha ISO), o null
+let editandoEvento = null; // id de la fecha del calendario en edición, o null si es nueva
+let anualTocado = false; // si la persona ha cambiado a mano "Se repite cada año"
+let ultimoTipoEvento = 'evento';
+const VISTAS = ['resumen', 'movimientos', 'historial', 'calendario', 'compra', 'ajustes'];
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
 
@@ -121,10 +126,11 @@ function pintar() {
   $('#nombre-mes').setAttribute('aria-label', porAño ? 'Volver al año actual' : 'Volver al mes actual');
   $('[data-accion="mes-anterior"]').setAttribute('aria-label', porAño ? `${unidad} anterior` : 'Mes anterior');
   $('[data-accion="mes-siguiente"]').setAttribute('aria-label', porAño ? `${unidad} siguiente` : 'Mes siguiente');
-  $('#selector-mes').style.visibility = vista === 'ajustes' ? 'hidden' : 'visible';
+  $('#selector-mes').style.visibility = vista === 'ajustes' || vista === 'compra' ? 'hidden' : 'visible';
   $('#selector-mes').classList.toggle('anual', porAño);
-  $('.fab').hidden = vista === 'ajustes';
-  for (const v of ['resumen', 'movimientos', 'historial', 'ajustes']) {
+  $('.fab').hidden = vista === 'ajustes' || vista === 'compra';
+  $('.fab').setAttribute('aria-label', vista === 'calendario' ? 'Apuntar una fecha' : 'Apuntar un movimiento');
+  for (const v of VISTAS) {
     $(`#vista-${v}`).hidden = v !== vista;
     const boton = document.querySelector(`.barra [data-vista="${v}"]`);
     if (v === vista) boton.setAttribute('aria-current', 'page');
@@ -133,6 +139,8 @@ function pintar() {
   if (vista === 'resumen') pintarResumen();
   if (vista === 'movimientos') pintarMovimientos();
   if (vista === 'historial') pintarHistorial();
+  if (vista === 'calendario') pintarCalendario();
+  if (vista === 'compra') pintarCompra();
   if (vista === 'ajustes') pintarAjustes();
 }
 
@@ -579,7 +587,7 @@ function pintarAjustes() {
     </div>
     <div class="tarjeta">
       <h2>Copia de seguridad</h2>
-      <p class="explica">Tus datos solo están en este móvil. Guarda una copia de vez en cuando (por ejemplo, mándatela por correo) para no perderlos si cambias de teléfono.</p>
+      <p class="explica">Tus datos solo están en este móvil. Guarda una copia de vez en cuando (por ejemplo, mándatela por correo) para no perderlos si cambias de teléfono. La copia lleva también el calendario y la lista de compra.</p>
       <div class="botones-col">
         <button type="button" class="boton" data-accion="exportar">Guardar una copia</button>
         <button type="button" class="boton" data-accion="importar">Recuperar desde una copia</button>
@@ -592,7 +600,7 @@ function pintarAjustes() {
     </div>
     <div class="tarjeta">
       <h2>Empezar de cero</h2>
-      <p class="explica">Borra todos los movimientos y deja las categorías como al principio.</p>
+      <p class="explica">Borra todos los movimientos y deja las categorías como al principio. El calendario y la lista de compra no se tocan.</p>
       <button type="button" class="boton peligro-suave" data-accion="borrar-todo">Borrar todo</button>
     </div>
     <p class="version">Versión ${esc(BUILD)}</p>`;
@@ -1374,6 +1382,234 @@ async function borrarEsperado() {
   pintar();
 }
 
+// ---------- Calendario ----------
+
+const PRIMER_DIA = 0; // la semana empieza en domingo
+const conMayuscula = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const emojiEvento = (e) => (C.TIPOS_EVENTO[e.tipo] || C.TIPOS_EVENTO.evento).emoji;
+
+/** Una fecha del calendario en una lista: icono, título, detalle y, a la derecha, cuándo. */
+function filaEvento({ evento: e, fecha }, derecha, conFecha = true) {
+  const detalle = [conFecha ? C.fechaCorta(fecha) : '', e.anual ? 'Cada año' : '', e.nota].filter(Boolean).join(' · ');
+  return `
+    <button type="button" class="cat-edit evento" data-accion="editar-evento" data-id="${esc(e.id)}">
+      <span class="emoji" aria-hidden="true">${esc(emojiEvento(e))}</span>
+      <span class="texto">${esc(e.titulo)}${detalle ? `<br><span class="detalle">${esc(detalle)}</span>` : ''}</span>
+      <span class="cuando">${esc(derecha || '')}</span>
+    </button>`;
+}
+
+function pintarCalendario() {
+  const hoy = C.hoyISO();
+  if (diaSel && C.claveMes(diaSel) !== mes) diaSel = null;
+  if (!diaSel && C.claveMes(hoy) === mes) diaSel = hoy;
+  const delMes = C.eventosDelMes(datos.eventos, mes);
+  const porDia = new Map();
+  for (const x of delMes) {
+    if (!porDia.has(x.fecha)) porDia.set(x.fecha, []);
+    porDia.get(x.fecha).push(x);
+  }
+  const nombreMesMin = C.nombreMes(mes).slice(0, -5).toLowerCase();
+
+  const cabecera = Array.from({ length: 7 }, (_, i) => `<span class="cal-sem" aria-hidden="true">${C.DIAS_CORTOS[(PRIMER_DIA + i) % 7]}</span>`).join('');
+  const celdas = C.celdasMes(mes, PRIMER_DIA).map((f) => {
+    if (!f) return '<span class="cal-hueco"></span>';
+    const evs = porDia.get(f) || [];
+    const n = Number(f.slice(8));
+    const etiqueta = `${n} de ${nombreMesMin}${f === hoy ? ', hoy' : ''}${evs.length ? `: ${evs.map((x) => x.evento.titulo).join(', ')}` : ''}`;
+    return `<button type="button" class="cal-dia${f === hoy ? ' hoy' : ''}" data-accion="cal-dia" data-fecha="${f}"
+        aria-pressed="${f === diaSel}" aria-label="${esc(etiqueta)}">
+        <span class="cal-num">${n}</span>
+        <span class="cal-puntos">${evs.slice(0, 3).map((x) => `<i class="punto ${esc(x.evento.tipo)}"></i>`).join('')}</span>
+      </button>`;
+  }).join('');
+  let html = `<div class="tarjeta calendario"><div class="cal-rejilla">${cabecera}${celdas}</div>
+    <div class="leyenda cal-leyenda">${Object.entries(C.TIPOS_EVENTO).map(([k, t]) => `<span><i class="punto ${k}"></i>${esc(t.nombre)}</span>`).join('')}</div></div>`;
+
+  if (diaSel) {
+    const evs = porDia.get(diaSel) || [];
+    html += `<div class="tarjeta">
+      <h2>${esc(conMayuscula(C.fechaLarga(diaSel)))}${diaSel === hoy ? ' (hoy)' : ''}</h2>
+      ${evs.length ? evs.map((x) => filaEvento(x, '', false)).join('') : '<p class="subtitulo">Nada apuntado este día.</p>'}
+      <button type="button" class="boton-linea" data-accion="nuevo-evento" data-fecha="${diaSel}">+ Apuntar algo este día</button>
+    </div>`;
+  }
+
+  if (!datos.eventos.length) {
+    html += `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🎂</span>
+      Apunta aquí cumpleaños, eventos y fechas importantes.<br>Toca un día o dale al <strong>+</strong>.</div>`;
+    $('#vista-calendario').innerHTML = html;
+    return;
+  }
+  html += `<div class="tarjeta"><h2>En ${esc(nombreMesMin)}</h2>
+    ${delMes.length ? delMes.map((x) => filaEvento(x, '')).join('') : `<p class="subtitulo">Nada apuntado en ${esc(nombreMesMin)}.</p>`}
+  </div>`;
+  const prox = C.proximosEventos(datos.eventos, hoy);
+  html += `<div class="tarjeta"><h2>Lo que viene</h2>
+    ${prox.length ? prox.map((x) => filaEvento(x, C.textoFaltan(x.faltan))).join('') : '<p class="subtitulo">Nada en los próximos doce meses.</p>'}
+  </div>`;
+  $('#vista-calendario').innerHTML = html;
+}
+
+function tipoEvento() {
+  return document.querySelector('#form-evento input[name="ev-tipo"]:checked')?.value || 'evento';
+}
+
+/** La etiqueta y el ejemplo del título cambian según lo que se apunta; un cumpleaños se repite cada año. */
+function ajustarFormEvento() {
+  const t = tipoEvento();
+  $('#ev-titulo-etiqueta').textContent = t === 'cumple' ? 'De quién es' : 'Qué es';
+  $('#ev-titulo').placeholder = t === 'cumple' ? 'Por ejemplo, Abuela Rosa'
+    : t === 'importante' ? 'Por ejemplo, Aniversario de boda' : 'Por ejemplo, Reunión del colegio';
+  if (!anualTocado) $('#ev-anual').checked = t === 'cumple';
+}
+
+/** Para una fecha nueva: el día tocado; si no, hoy si se ve este mes; si no, el día 1 del mes que se ve. */
+function fechaPorDefecto() {
+  if (diaSel && C.claveMes(diaSel) === mes) return diaSel;
+  const hoy = C.hoyISO();
+  return C.claveMes(hoy) === mes ? hoy : `${mes}-01`;
+}
+
+/** Abre la hoja para apuntar una fecha nueva (en `fecha`, si se da) o cambiar la que tiene ese id. */
+function abrirEvento(id = null, fecha = null) {
+  const e = id ? datos.eventos.find((x) => x.id === id) : null;
+  editandoEvento = e ? e.id : null;
+  $('#dlg-evento-titulo').textContent = e ? 'Cambiar fecha' : 'Nueva fecha';
+  const tipo = e ? e.tipo : ultimoTipoEvento;
+  for (const r of document.querySelectorAll('#form-evento input[name="ev-tipo"]')) r.checked = r.value === tipo;
+  $('#ev-titulo').value = e ? e.titulo : '';
+  $('#ev-fecha').value = e ? e.fecha : (fecha || fechaPorDefecto());
+  $('#ev-nota').value = e ? e.nota : '';
+  anualTocado = !!e;
+  $('#ev-anual').checked = e ? e.anual : false;
+  ajustarFormEvento();
+  $('#ev-error').hidden = true;
+  $('#ev-borrar').hidden = !e;
+  $('#dlg-evento').showModal();
+  if (!e) $('#ev-titulo').focus();
+}
+
+function guardarEvento() {
+  const titulo = $('#ev-titulo').value.trim();
+  const fecha = $('#ev-fecha').value;
+  const tipo = tipoEvento();
+  const err = $('#ev-error');
+  if (!titulo) {
+    err.textContent = tipo === 'cumple' ? 'Escribe de quién es el cumpleaños.' : 'Escribe qué es.';
+    err.hidden = false;
+    $('#ev-titulo').focus();
+    return;
+  }
+  if (!C.esFechaISO(fecha)) { err.textContent = 'Elige la fecha.'; err.hidden = false; return; }
+  const ev = {
+    id: editandoEvento || C.nuevoId(),
+    titulo: titulo.slice(0, 80),
+    fecha,
+    tipo,
+    anual: $('#ev-anual').checked,
+    nota: $('#ev-nota').value.trim().slice(0, 200),
+  };
+  const antes = datos.eventos;
+  datos.eventos = editandoEvento ? antes.map((x) => (x.id === editandoEvento ? ev : x)) : [...antes, ev];
+  if (!guardar()) { datos.eventos = antes; return; }
+  ultimoTipoEvento = tipo;
+  const cambiado = !!editandoEvento;
+  $('#dlg-evento').close();
+  // Se va al mes en que cae (en el año que se está viendo, si se repite) para verlo.
+  const cae = C.fechaEnAño(ev, Number(mes.slice(0, 4))) || ev.fecha;
+  mes = C.claveMes(cae);
+  diaSel = cae;
+  aviso(cambiado ? 'Cambiado' : 'Apuntado en el calendario');
+  pintar();
+}
+
+async function borrarEvento() {
+  const e = datos.eventos.find((x) => x.id === editandoEvento);
+  if (!e) return;
+  $('#dlg-evento').close();
+  const ok = await confirmar({ titulo: `¿Borrar «${e.titulo}»?`, texto: 'Se quita del calendario.', si: 'Borrar' });
+  if (!ok) return;
+  datos.eventos = datos.eventos.filter((x) => x.id !== e.id);
+  guardar();
+  aviso('Borrado del calendario');
+  pintar();
+}
+
+// ---------- Lista de compra ----------
+
+function pintarCompra() {
+  const { pendientes, comprados } = C.ordenCompra(datos.compra);
+  const fila = (x) => `
+    <li class="articulo${x.hecho ? ' hecho' : ''}">
+      <button type="button" class="art-marcar" data-accion="compra-marcar" data-id="${esc(x.id)}" role="checkbox" aria-checked="${x.hecho}">
+        <span class="caja" aria-hidden="true">${x.hecho ? '✓' : ''}</span>
+        <span class="art-texto">${esc(x.texto)}</span>
+      </button>
+      <button type="button" class="icono art-borrar" data-accion="compra-borrar" data-id="${esc(x.id)}" aria-label="${esc(`Quitar ${x.texto}`)}">✕</button>
+    </li>`;
+  let html = '';
+  if (!pendientes.length && !comprados.length) {
+    html = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🛒</span>
+      La lista está vacía.<br>Escribe arriba lo que haga falta y dale a <strong>Añadir</strong>.</div>`;
+  } else {
+    html += `<div class="tarjeta"><h2>Por comprar (${pendientes.length})</h2>
+      ${pendientes.length
+    ? `<p class="explica">Toca lo que ya tengas para tacharlo.</p><ul class="compra-lista">${pendientes.map(fila).join('')}</ul>`
+    : '<p class="subtitulo">No falta nada.</p>'}
+    </div>`;
+    if (comprados.length) {
+      html += `<div class="tarjeta"><h2>Ya comprado (${comprados.length})</h2>
+        <ul class="compra-lista">${comprados.map(fila).join('')}</ul>
+        <button type="button" class="boton-linea" data-accion="compra-limpiar">Quitar lo comprado de la lista</button>
+      </div>`;
+    }
+  }
+  $('#compra-lista').innerHTML = html;
+}
+
+function añadirCompra() {
+  const campo = $('#compra-texto');
+  const r = C.añadirArticulo(datos.compra, campo.value);
+  if (r.estado === 'vacio') { campo.focus(); return; }
+  if (r.estado === 'repetido') { aviso('Ya está en la lista'); campo.select(); return; }
+  const antes = datos.compra;
+  datos.compra = r.lista;
+  if (!guardar()) { datos.compra = antes; return; }
+  campo.value = '';
+  campo.focus(); // para seguir apuntando sin volver a tocar el campo
+  if (r.estado === 'otra-vez') aviso('Estaba comprado: vuelve a la lista');
+  pintarCompra();
+}
+
+function marcarCompra(id) {
+  datos.compra = C.marcarArticulo(datos.compra, id);
+  guardar();
+  pintarCompra();
+}
+
+function borrarDeCompra(id) {
+  datos.compra = datos.compra.filter((x) => x.id !== id);
+  guardar();
+  pintarCompra();
+}
+
+async function limpiarCompra() {
+  const n = C.ordenCompra(datos.compra).comprados.length;
+  if (!n) return;
+  const ok = await confirmar({
+    titulo: `¿Quitar ${plural(n, 'cosa comprada', 'cosas compradas')}?`,
+    texto: 'Salen de la lista. Lo que falta por comprar se queda.',
+    si: 'Quitar',
+    peligro: false,
+  });
+  if (!ok) return;
+  datos.compra = C.quitarComprados(datos.compra);
+  guardar();
+  aviso('Lista limpia');
+  pintarCompra();
+}
+
 // ---------- Copia de seguridad ----------
 
 async function exportar() {
@@ -1409,9 +1645,16 @@ async function importar(archivo) {
   }
   if (!r.ok) { aviso(r.error); return; }
   const n = r.datos.movimientos.length;
+  // Una copia de antes del calendario y la lista de compra no los borra: se quedan los de este móvil.
+  const guarda = [];
+  if (!r.trae.eventos && datos.eventos.length) { r.datos.eventos = datos.eventos; guarda.push('el calendario'); }
+  if (!r.trae.compra && datos.compra.length) { r.datos.compra = datos.compra; guarda.push('la lista de compra'); }
+  const extra = [];
+  if (r.trae.eventos && r.datos.eventos.length) extra.push(plural(r.datos.eventos.length, 'fecha en el calendario', 'fechas en el calendario'));
+  if (r.trae.compra && r.datos.compra.length) extra.push(plural(r.datos.compra.length, 'cosa en la lista de compra', 'cosas en la lista de compra'));
   const ok = await confirmar({
     titulo: '¿Recuperar esta copia?',
-    texto: `Tiene ${n} movimiento${n === 1 ? '' : 's'}. Sustituye todo lo que hay ahora en este móvil.`,
+    texto: `Tiene ${n} movimiento${n === 1 ? '' : 's'}${extra.length ? ` y ${extra.join(' y ')}` : ''}. Sustituye todo lo que hay ahora en este móvil${guarda.length ? `, salvo ${guarda.join(' y ')}, que la copia no trae` : ''}.`,
     si: 'Recuperar',
     peligro: false,
   });
@@ -1483,9 +1726,9 @@ async function borrarTodo() {
     si: 'Borrar todo',
   });
   if (!ok) return;
-  const { moneda, inicioAño } = datos;
+  const { moneda, inicioAño, eventos, compra } = datos;
   datos = C.datosIniciales();
-  Object.assign(datos, { moneda, inicioAño });
+  Object.assign(datos, { moneda, inicioAño, eventos, compra }); // el calendario y la lista de compra se quedan
   guardar();
   aviso('Todo borrado');
   pintar();
@@ -1508,7 +1751,14 @@ document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-accion]');
   if (!el) return;
   switch (el.dataset.accion) {
-    case 'nuevo': abrirMovimiento(); break;
+    case 'nuevo': if (vista === 'calendario') abrirEvento(); else abrirMovimiento(); break;
+    case 'cal-dia': diaSel = el.dataset.fecha; pintarCalendario(); break;
+    case 'nuevo-evento': abrirEvento(null, el.dataset.fecha); break;
+    case 'editar-evento': abrirEvento(el.dataset.id); break;
+    case 'borrar-evento': borrarEvento(); break;
+    case 'compra-marcar': marcarCompra(el.dataset.id); break;
+    case 'compra-borrar': borrarDeCompra(el.dataset.id); break;
+    case 'compra-limpiar': limpiarCompra(); break;
     case 'editar-mov': abrirMovimiento(el.dataset.id); break;
     case 'borrar-mov': borrarMovimiento(); break;
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
@@ -1557,7 +1807,7 @@ document.addEventListener('click', (e) => {
     // Con un rango de meses, las flechas lo mueven de su propia longitud.
     case 'mes-anterior': if (vista === 'historial') moverPeriodo(-1); else mes = C.moverMes(mes, -1); pintar(); break;
     case 'mes-siguiente': if (vista === 'historial') moverPeriodo(1); else mes = C.moverMes(mes, 1); pintar(); break;
-    case 'mes-hoy': if (vista === 'historial') { rango = null; año = añoDeHoy(); } else mes = C.claveMes(C.hoyISO()); pintar(); break;
+    case 'mes-hoy': if (vista === 'historial') { rango = null; año = añoDeHoy(); } else { mes = C.claveMes(C.hoyISO()); diaSel = null; } pintar(); break;
     case 'periodo-ultimos': {
       const hoy = C.claveMes(C.hoyISO());
       rango = { desde: C.moverMes(hoy, 1 - Number(el.dataset.n)), hasta: hoy };
@@ -1619,6 +1869,10 @@ $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMo
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });
 $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
 $('#form-esperado').addEventListener('submit', (e) => { e.preventDefault(); guardarEsperado(); });
+$('#form-evento').addEventListener('submit', (e) => { e.preventDefault(); guardarEvento(); });
+$('#form-compra').addEventListener('submit', (e) => { e.preventDefault(); añadirCompra(); });
+for (const r of document.querySelectorAll('#form-evento input[name="ev-tipo"]')) r.addEventListener('change', ajustarFormEvento);
+$('#ev-anual').addEventListener('change', () => { anualTocado = true; });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
     pintarChips(categoriaPorDefecto(tipoMov())?.id);

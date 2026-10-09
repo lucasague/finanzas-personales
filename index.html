@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mis cuentas</title>
-  <meta name="description" content="Apunta tus gastos e ingresos y mira cómo va el mes. Tus datos se quedan en tu móvil.">
+  <meta name="description" content="Apunta tus gastos e ingresos, las fechas de la familia y la lista de compra. Tus datos se quedan en tu móvil.">
   <meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="b8f3a4683f">
+  <meta name="version" content="82eeaf59ca">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -35,8 +35,16 @@
     <section id="vista-resumen" class="vista" aria-label="Resumen del mes"></section>
     <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
+    <section id="vista-calendario" class="vista" aria-label="Calendario" hidden></section>
+    <section id="vista-compra" class="vista" aria-label="Lista de compra" hidden>
+      <form id="form-compra" class="compra-form" autocomplete="off" novalidate>
+        <input id="compra-texto" maxlength="80" autocomplete="off" placeholder="Qué hay que comprar" aria-label="Qué hay que comprar">
+        <button type="submit" class="boton principal">Añadir</button>
+      </form>
+      <div id="compra-lista"></div>
+    </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.16 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.17 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -45,6 +53,8 @@
     <button type="button" data-vista="resumen" aria-current="page"><span aria-hidden="true">◔</span>Resumen</button>
     <button type="button" data-vista="movimientos"><span aria-hidden="true">≡</span>Movimientos</button>
     <button type="button" data-vista="historial"><span aria-hidden="true">▤</span>Historial</button>
+    <button type="button" data-vista="calendario"><span aria-hidden="true">▦</span>Calendario</button>
+    <button type="button" data-vista="compra"><span aria-hidden="true">☑&#xFE0E;</span>Compra</button>
     <button type="button" data-vista="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
   </nav>
 
@@ -280,6 +290,42 @@
       <p class="error" id="esp-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-esperado" id="esp-borrar" hidden>Ya no lo espero</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Apuntar / editar una fecha del calendario -->
+  <dialog id="dlg-evento" class="hoja" aria-labelledby="dlg-evento-titulo">
+    <form method="dialog" id="form-evento" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-evento-titulo">Nueva fecha</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="segmentado tres con-icono" role="radiogroup" aria-label="Qué es">
+        <label><input type="radio" name="ev-tipo" value="cumple"><span><b aria-hidden="true">🎂</b>Cumpleaños</span></label>
+        <label><input type="radio" name="ev-tipo" value="evento" checked><span><b aria-hidden="true">📅</b>Evento</span></label>
+        <label><input type="radio" name="ev-tipo" value="importante"><span><b aria-hidden="true">⭐</b>Importante</span></label>
+      </div>
+      <label class="campo">
+        <span id="ev-titulo-etiqueta">Qué es</span>
+        <input id="ev-titulo" maxlength="80" autocomplete="off" required>
+      </label>
+      <label class="campo">
+        <span>Fecha</span>
+        <input id="ev-fecha" type="date" required>
+      </label>
+      <label class="casilla">
+        <input type="checkbox" id="ev-anual">
+        <span>Se repite cada año</span>
+      </label>
+      <label class="campo">
+        <span>Nota</span>
+        <input id="ev-nota" maxlength="200" autocomplete="off" placeholder="Opcional">
+      </label>
+      <p class="error" id="ev-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-evento" id="ev-borrar" hidden>Borrar</button>
         <button type="submit" class="boton principal">Guardar</button>
       </div>
     </form>

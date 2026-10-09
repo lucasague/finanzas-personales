@@ -35,7 +35,7 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 6;
+export const VERSION_DATOS = 7;
 export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
@@ -50,6 +50,8 @@ export function datosIniciales() {
     esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
     esperadosMes: [], // lo esperado de un mes concreto, cuando no es lo habitual
     iconosAuto: true, // ya se pusieron los iconos por el nombre (ver ponerIconos)
+    eventos: [], // calendario: cumpleaños, eventos y fechas importantes
+    compra: [], // lista de compra
   };
 }
 
@@ -379,7 +381,12 @@ export function validarCopia(obj) {
         esperadosMes: validarEsperadosMes(obj.esperadosMes),
         // Hasta la versión 6 no se ponían iconos por el nombre: se ponen una vez al abrir.
         iconosAuto: obj.iconosAuto === true,
+        // Hasta la versión 7 no había calendario ni lista de compra.
+        eventos: validarEventos(obj.eventos),
+        compra: validarCompra(obj.compra),
       },
+      // Si la copia trae calendario y lista de compra (las de antes de la versión 7 no los traen).
+      trae: { eventos: Array.isArray(obj.eventos), compra: Array.isArray(obj.compra) },
       descartados,
     };
   } catch (e) {
@@ -1429,4 +1436,162 @@ export function moverMovimientos(movimientos, ids, destino) {
     return { ...m, categoria: destino };
   });
   return { movimientos: movs, n };
+}
+
+// ---------- Calendario de la familia (v0.17) ----------
+// Cada fecha guarda el día en que se apuntó (con su año). Las que se repiten cada año (cumpleaños) salen ese
+// día y mes todos los años a partir de ese; las demás, solo ese día.
+
+export const TIPOS_EVENTO = {
+  cumple: { emoji: '🎂', nombre: 'Cumpleaños' },
+  evento: { emoji: '📅', nombre: 'Evento' },
+  importante: { emoji: '⭐', nombre: 'Fecha importante' },
+};
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+/** Cabecera del calendario, empezando en domingo (como los calendarios de México y Costa Rica). */
+export const DIAS_CORTOS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'];
+const dos = (n) => String(n).padStart(2, '0');
+const esBisiesto = (a) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
+const diaUTC = (iso) => { const [a, m, d] = iso.split('-').map(Number); return Date.UTC(a, m - 1, d); };
+
+/** Días de `desde` a `hasta` (fechas ISO); negativo si `hasta` va antes. */
+export function diasEntre(desde, hasta) {
+  return Math.round((diaUTC(hasta) - diaUTC(desde)) / 86400000);
+}
+
+/** "2026-10-12" -> "lunes 12 de octubre" */
+export function fechaLarga(iso) {
+  if (!esFechaISO(iso)) return '';
+  const [, m, d] = iso.split('-').map(Number);
+  return `${DIAS_SEMANA[new Date(diaUTC(iso)).getUTCDay()]} ${d} de ${MESES[m - 1].toLowerCase()}`;
+}
+
+/** "2026-10-12" -> "12 oct" */
+export function fechaCorta(iso) {
+  if (!esFechaISO(iso)) return '';
+  const [, m, d] = iso.split('-').map(Number);
+  return `${d} ${MESES[m - 1].slice(0, 3).toLowerCase()}`;
+}
+
+/** "Hoy", "Mañana", "En 5 días". */
+export function textoFaltan(n) {
+  return n === 0 ? 'Hoy' : n === 1 ? 'Mañana' : `En ${n} días`;
+}
+
+/**
+ * El día en que cae un evento en el año `año` (ISO), o null si ese año no sale. Un 29 de febrero que se repite
+ * cada año sale el 28 en los años no bisiestos.
+ */
+export function fechaEnAño(evento, año) {
+  const [a, m, d] = evento.fecha.split('-').map(Number);
+  if (!evento.anual) return a === año ? evento.fecha : null;
+  if (año < a) return null;
+  const dia = m === 2 && d === 29 && !esBisiesto(año) ? 28 : d;
+  return `${año}-${dos(m)}-${dos(dia)}`;
+}
+
+const porFechaYTitulo = (x, y) => (x.fecha < y.fecha ? -1 : x.fecha > y.fecha ? 1 : x.evento.titulo.localeCompare(y.evento.titulo, 'es'));
+
+/** Lo que cae en el mes `clave` ("2026-10"), en orden: [{ evento, fecha }]. */
+export function eventosDelMes(eventos, clave) {
+  const año = Number(clave.slice(0, 4));
+  return eventos
+    .map((evento) => ({ evento, fecha: fechaEnAño(evento, año) }))
+    .filter((x) => x.fecha && claveMes(x.fecha) === clave)
+    .sort(porFechaYTitulo);
+}
+
+/** Lo que viene desde `hoy` (incluido) en los próximos `dias`, como mucho `max`: [{ evento, fecha, faltan }]. */
+export function proximosEventos(eventos, hoy, { dias = 365, max = 8 } = {}) {
+  const año = Number(hoy.slice(0, 4));
+  const res = [];
+  for (const evento of eventos) {
+    for (const a of [año, año + 1]) {
+      const fecha = fechaEnAño(evento, a);
+      if (!fecha || fecha < hoy) continue;
+      const faltan = diasEntre(hoy, fecha);
+      if (faltan <= dias) res.push({ evento, fecha, faltan });
+      break; // solo la próxima vez que cae
+    }
+  }
+  return res.sort(porFechaYTitulo).slice(0, max);
+}
+
+/**
+ * Las casillas del mes `clave` para pintarlo en una rejilla de 7 columnas: null para los huecos del principio y
+ * luego la fecha ISO de cada día. `primerDia`: 0 si la semana empieza en domingo, 1 si en lunes.
+ */
+export function celdasMes(clave, primerDia = 0) {
+  const [a, m] = clave.split('-').map(Number);
+  const huecos = (new Date(Date.UTC(a, m - 1, 1)).getUTCDay() - primerDia + 7) % 7;
+  const n = new Date(Date.UTC(a, m, 0)).getUTCDate();
+  return [...Array(huecos).fill(null), ...Array.from({ length: n }, (_, i) => `${clave}-${dos(i + 1)}`)];
+}
+
+function validarEventos(lista) {
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  const res = [];
+  for (const e of lista) {
+    if (!e || !esFechaISO(e.fecha) || typeof e.titulo !== 'string' || !e.titulo.trim()) continue;
+    let id = typeof e.id === 'string' && e.id ? e.id : nuevoId();
+    while (ids.has(id)) id = nuevoId();
+    ids.add(id);
+    res.push({
+      id,
+      titulo: e.titulo.trim().slice(0, 80),
+      fecha: e.fecha,
+      tipo: TIPOS_EVENTO[e.tipo] ? e.tipo : 'evento',
+      anual: e.anual === true,
+      nota: typeof e.nota === 'string' ? e.nota.trim().slice(0, 200) : '',
+    });
+  }
+  return res;
+}
+
+// ---------- Lista de compra (v0.17) ----------
+// Una lista: [{ id, texto, hecho, creado }]. "hecho" = ya comprado (se ve tachado hasta que se quitan los comprados).
+
+function validarCompra(lista) {
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  const res = [];
+  for (const x of lista) {
+    if (!x || typeof x.texto !== 'string' || !x.texto.trim()) continue;
+    let id = typeof x.id === 'string' && x.id ? x.id : nuevoId();
+    while (ids.has(id)) id = nuevoId();
+    ids.add(id);
+    res.push({ id, texto: x.texto.trim().slice(0, 80), hecho: x.hecho === true, creado: Number.isFinite(x.creado) ? x.creado : 0 });
+  }
+  return res;
+}
+
+/**
+ * Añade un artículo a la lista. Si ya está por comprar (aunque sea con otras mayúsculas o tildes), no lo repite;
+ * si estaba comprado, vuelve a "por comprar" al final. No toca lo que recibe: devuelve { lista, estado } con estado
+ * 'nuevo', 'repetido', 'otra-vez' o 'vacio'.
+ */
+export function añadirArticulo(lista, texto, ahora = Date.now()) {
+  const t = String(texto ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!t) return { lista, estado: 'vacio' };
+  const clave = nombreComparable(t);
+  const ya = lista.find((x) => nombreComparable(x.texto) === clave);
+  if (ya && !ya.hecho) return { lista, estado: 'repetido' };
+  if (ya) return { lista: [...lista.filter((x) => x !== ya), { ...ya, hecho: false, creado: ahora }], estado: 'otra-vez' };
+  return { lista: [...lista, { id: nuevoId(), texto: t, hecho: false, creado: ahora }], estado: 'nuevo' };
+}
+
+/** Marca o desmarca un artículo como comprado. No toca lo que recibe. */
+export function marcarArticulo(lista, id) {
+  return lista.map((x) => (x.id === id ? { ...x, hecho: !x.hecho } : x));
+}
+
+/** Quita de la lista lo ya comprado. */
+export function quitarComprados(lista) {
+  return lista.filter((x) => !x.hecho);
+}
+
+/** Lo que falta por comprar y lo ya comprado, cada uno en el orden en que se apuntó. */
+export function ordenCompra(lista) {
+  return { pendientes: lista.filter((x) => !x.hecho), comprados: lista.filter((x) => x.hecho) };
 }

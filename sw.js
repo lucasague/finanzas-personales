@@ -1,7 +1,7 @@
 // Service worker: red primero (así una versión nueva se ve al momento) y caché para funcionar sin conexión.
-// b8f3a4683f lo sustituye bin/publicar.sh por una huella del contenido: cada publicación cambia este archivo,
+// 82eeaf59ca lo sustituye bin/publicar.sh por una huella del contenido: cada publicación cambia este archivo,
 // el navegador detecta el service worker nuevo y la app muestra "Hay una versión nueva".
-const BUILD = 'b8f3a4683f';
+const BUILD = '82eeaf59ca';
 const CACHE = 'mis-cuentas-' + BUILD;
 const ARCHIVOS = [
   './',
