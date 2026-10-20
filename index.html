@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="82eeaf59ca">
+  <meta name="version" content="82443d1b1f">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -44,7 +44,7 @@
       <div id="compra-lista"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.17 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.18 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -83,6 +83,17 @@
       </div>
       <p class="error" id="mov-error" hidden></p>
       <div id="mov-categorias" class="cat-niveles"></div>
+      <button type="button" class="boton" data-accion="dividir-mov" id="mov-dividir">Dividir en dos categorías</button>
+      <div id="mov-division" hidden>
+        <p class="etiqueta-moneda">Segunda parte</p>
+        <label class="campo">
+          <span>Cuánto va en la segunda categoría</span>
+          <input id="mov-importe2" inputmode="decimal" autocomplete="off" placeholder="0">
+        </label>
+        <p class="nota-tasa" id="mov-division-resto"></p>
+        <div id="mov-categorias2" class="cat-niveles"></div>
+        <button type="button" class="boton" data-accion="quitar-division">No dividir</button>
+      </div>
       <div id="mov-cuenta-bloque">
         <p class="etiqueta-moneda">Cuenta</p>
         <div class="chips" id="mov-cuentas" role="radiogroup" aria-label="Cuenta"></div>

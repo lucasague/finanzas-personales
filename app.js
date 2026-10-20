@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '82eeaf59ca';
+const BUILD = '82443d1b1f';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -627,16 +627,18 @@ function tipoMov() {
 }
 
 let catElegida = null; // categoría elegida al apuntar (en cualquier nivel)
+let catElegida2 = null; // categoría de la segunda parte, si el gasto se divide en dos
 
 /**
  * Botones de categoría: primero las principales del tipo; al elegir una que tiene subcategorías, aparecen debajo
  * (y luego las del tercer nivel). Se guarda la más concreta que esté marcada.
  */
-function pintarChips(seleccion) {
+function pintarChips(seleccion, parte = 1) {
   const tipo = tipoMov();
   const ruta = C.rutaCategoria(datos.categorias, seleccion);
-  catElegida = ruta.length && ruta[0].tipo === tipo ? seleccion : null;
-  if (!catElegida) ruta.length = 0;
+  const elegida = ruta.length && ruta[0].tipo === tipo ? seleccion : null;
+  if (parte === 1) catElegida = elegida; else catElegida2 = elegida;
+  if (!elegida) ruta.length = 0;
   const chip = (c, marcada) => `
     <button type="button" class="chip" role="radio" aria-checked="${marcada}" data-cat="${esc(c.id)}">
       ${c.emoji ? `<span aria-hidden="true">${esc(c.emoji)}</span>` : ''}${esc(c.nombre)}
@@ -656,7 +658,7 @@ function pintarChips(seleccion) {
     padre = ruta[nivel].id;
   }
   if (ruta.length > 1) html += `<p class="se-guarda">Se guarda en: ${esc(ruta.map((c) => c.nombre).join(' › '))}</p>`;
-  $('#mov-categorias').innerHTML = html;
+  $(parte === 1 ? '#mov-categorias' : '#mov-categorias2').innerHTML = html;
 }
 
 /** Categoría con la que se abre el formulario: la última usada de ese tipo o la primera principal. */
@@ -701,11 +703,31 @@ function abrirMovimiento(id = null) {
   const hoy = C.hoyISO();
   $('#mov-fecha').value = m ? m.fecha : (C.claveMes(hoy) === mes ? hoy : `${mes}-01`);
   pintarChips(m ? m.categoria : categoriaPorDefecto(tipo)?.id);
+  mostrarDivision(false);
   const cuentaDef = datos.cuentas.find((c) => c.id === ultimaCuenta) || datos.cuentas[0];
   pintarCuentas(m ? m.cuenta : cuentaDef?.id);
   actualizarBase();
   $('#dlg-mov').showModal();
   if (!m) setTimeout(() => $('#mov-importe').focus(), 50);
+}
+
+/** "Dividir en dos categorías": una segunda parte con su importe y su categoría; al guardar salen dos movimientos. */
+function mostrarDivision(si) {
+  $('#mov-division').hidden = !si;
+  $('#mov-dividir').hidden = si;
+  $('#mov-importe2').value = '';
+  catElegida2 = null;
+  $('#mov-categorias2').innerHTML = '';
+  if (si) pintarChips(null, 2);
+  actualizarDivision();
+}
+
+function actualizarDivision() {
+  const nota = $('#mov-division-resto');
+  const total = C.parseImporte($('#mov-importe').value);
+  const parte2 = C.parseImporte($('#mov-importe2').value);
+  nota.textContent = total != null && parte2 != null && parte2 < total
+    ? `La primera categoría se queda con ${C.importeEditable(Math.round((total - parte2) * 100) / 100)}.` : '';
 }
 
 // Si el movimiento va en otra moneda, pide lo que costó en la principal y lo propone con el último tipo de cambio.
@@ -744,16 +766,32 @@ function guardarMovimiento() {
   const tipo = tipoMov();
   const cat = catSeleccionada();
   const cta = cuentaSeleccionada();
+  const dividir = !$('#mov-division').hidden;
+  let importe2 = null;
+  if (dividir) {
+    importe2 = C.parseImporte($('#mov-importe2').value);
+    if (importe2 == null || importe2 >= importe) { err.textContent = 'Escribe cuánto va en la segunda categoría (menos que el total).'; err.hidden = false; $('#mov-importe2').focus(); return; }
+    if (!catElegida2) { err.textContent = 'Elige la segunda categoría.'; err.hidden = false; return; }
+  }
   const campos = {
     tipo, importe, moneda, importeBase, monedaBase: importeBase ? datos.moneda : null,
     categoria: cat, cuenta: cta, nota: $('#mov-nota').value.trim().slice(0, 200), fecha,
   };
+  let segunda = null;
+  if (dividir) {
+    const r2 = (x) => Math.round(x * 100) / 100;
+    const base2 = importeBase ? r2(importeBase * importe2 / importe) : null;
+    segunda = { ...campos, importe: importe2, importeBase: base2, monedaBase: base2 ? datos.moneda : null, categoria: catElegida2 };
+    campos.importe = r2(importe - importe2);
+    campos.importeBase = importeBase ? r2(importeBase - base2) : null;
+  }
   if (editandoMov) {
     const m = datos.movimientos.find((x) => x.id === editandoMov);
     if (m) Object.assign(m, campos);
   } else {
     datos.movimientos.push({ id: C.nuevoId(), creado: Date.now(), ...campos });
   }
+  if (segunda) datos.movimientos.push({ id: C.nuevoId(), creado: Date.now(), ...segunda });
   if (cat) ultimaCategoria[tipo] = cat;
   ultimaMoneda = moneda;
   if (cta) ultimaCuenta = cta;
@@ -761,7 +799,7 @@ function guardarMovimiento() {
   $('#dlg-mov').close();
   mes = C.claveMes(fecha);
   año = C.inicioDelAño(mes, datos.inicioAño);
-  aviso(editandoMov ? 'Cambios guardados' : `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} apuntado`);
+  aviso(segunda ? 'Gasto dividido en dos' : editandoMov ? 'Cambios guardados' : `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} apuntado`);
   pintar();
 }
 
@@ -1742,6 +1780,8 @@ document.addEventListener('click', (e) => {
 
   const chip = e.target.closest('#mov-categorias .chip');
   if (chip) { pintarChips(chip.dataset.cat); return; }
+  const chip2 = e.target.closest('#mov-categorias2 .chip');
+  if (chip2) { pintarChips(chip2.dataset.cat, 2); return; }
   const chipCuenta = e.target.closest('#mov-cuentas .chip');
   if (chipCuenta) {
     for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(b === chipCuenta));
@@ -1761,6 +1801,8 @@ document.addEventListener('click', (e) => {
     case 'compra-limpiar': limpiarCompra(); break;
     case 'editar-mov': abrirMovimiento(el.dataset.id); break;
     case 'borrar-mov': borrarMovimiento(); break;
+    case 'dividir-mov': mostrarDivision(true); break;
+    case 'quitar-division': mostrarDivision(false); break;
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
     case 'plegar-cat':
       if (!catAbiertas.delete(el.dataset.id)) catAbiertas.add(el.dataset.id);
@@ -1876,11 +1918,13 @@ $('#ev-anual').addEventListener('change', () => { anualTocado = true; });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
     pintarChips(categoriaPorDefecto(tipoMov())?.id);
+    if (!$('#mov-division').hidden) { catElegida2 = null; pintarChips(null, 2); }
     actualizarBase();
   });
 }
 $('#mov-moneda').addEventListener('change', () => { baseTocada = false; actualizarBase(); });
-$('#mov-importe').addEventListener('input', actualizarBase);
+$('#mov-importe').addEventListener('input', () => { actualizarBase(); actualizarDivision(); });
+$('#mov-importe2').addEventListener('input', actualizarDivision);
 $('#mov-fecha').addEventListener('change', actualizarBase);
 $('#mov-importe-base').addEventListener('input', () => { baseTocada = $('#mov-importe-base').value.trim() !== ''; actualizarBase(); });
 // Al escribir el nombre, el icono se sugiere solo (mientras no se haya puesto uno a mano).
