@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '82443d1b1f';
+const BUILD = 'ad9db94069';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -22,6 +22,7 @@ let diaSel = null; // en el Calendario, el día tocado (fecha ISO), o null
 let editandoEvento = null; // id de la fecha del calendario en edición, o null si es nueva
 let anualTocado = false; // si la persona ha cambiado a mano "Se repite cada año"
 let ultimoTipoEvento = 'evento';
+let editandoGuardados = false; // en la Compra, si se están quitando artículos guardados
 const VISTAS = ['resumen', 'movimientos', 'historial', 'calendario', 'compra', 'ajustes'];
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
@@ -1593,7 +1594,7 @@ function pintarCompra() {
   } else {
     html += `<div class="tarjeta"><h2>Por comprar (${pendientes.length})</h2>
       ${pendientes.length
-    ? `<p class="explica">Toca lo que ya tengas para tacharlo.</p><ul class="compra-lista">${pendientes.map(fila).join('')}</ul>`
+    ? `<p class="explica">Toca lo que ya tengas para tacharlo.</p>${C.agruparPorCategoria(pendientes).map((g) => `${g.categoria ? `<h3 class="compra-cat">${esc(g.categoria)}</h3>` : ''}<ul class="compra-lista">${g.items.map(fila).join('')}</ul>`).join('')}`
     : '<p class="subtitulo">No falta nada.</p>'}
     </div>`;
     if (comprados.length) {
@@ -1604,6 +1605,7 @@ function pintarCompra() {
     }
   }
   $('#compra-lista').innerHTML = html;
+  pintarGuardados();
 }
 
 function añadirCompra() {
@@ -1618,6 +1620,69 @@ function añadirCompra() {
   campo.focus(); // para seguir apuntando sin volver a tocar el campo
   if (r.estado === 'otra-vez') aviso('Estaba comprado: vuelve a la lista');
   pintarCompra();
+}
+
+function pintarGuardados() {
+  const enLista = new Set(C.ordenCompra(datos.compra).pendientes.map((x) => C.nombreComparable(x.texto)));
+  const chip = (x) => {
+    const esta = enLista.has(C.nombreComparable(x.texto));
+    return editandoGuardados
+      ? `<button type="button" class="chip-art quitar" data-accion="guardado-borrar" data-id="${esc(x.id)}" aria-label="${esc(`Quitar ${x.texto} de mis artículos`)}">${esc(x.texto)} ✕</button>`
+      : `<button type="button" class="chip-art${esta ? ' puesto' : ''}" data-accion="guardado-usar" data-id="${esc(x.id)}" aria-pressed="${esta}">${esta ? '✓ ' : '+ '}${esc(x.texto)}</button>`;
+  };
+  const grupos = C.agruparPorCategoria(datos.catalogo);
+  const cats = [...new Set(datos.catalogo.map((x) => x.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  let html = '<div class="tarjeta"><h2>Mis artículos</h2>';
+  html += datos.catalogo.length
+    ? `<p class="explica">${editandoGuardados ? 'Toca uno para quitarlo de tus artículos.' : 'Toca uno para ponerlo en la lista de hoy.'}</p>`
+      + grupos.map((g) => `${g.categoria ? `<h3 class="compra-cat">${esc(g.categoria)}</h3>` : ''}<div class="chips-art">${g.items.map(chip).join('')}</div>`).join('')
+    : '<p class="explica">Guarda aquí lo que compras a menudo, con su categoría (por ejemplo Carnes: pechuga de pollo), y luego solo lo tocas para ponerlo en la lista.</p>';
+  if (datos.catalogo.length) {
+    html += `<button type="button" class="boton-linea" data-accion="guardado-editar">${editandoGuardados ? 'Listo' : 'Quitar artículos guardados'}</button>`;
+  }
+  if (!editandoGuardados) {
+    html += `<form id="form-guardado" class="guardado-form" autocomplete="off" novalidate>
+      <input id="guardado-texto" maxlength="80" placeholder="Artículo (jamón)" aria-label="Artículo a guardar">
+      <input id="guardado-cat" maxlength="30" list="guardado-cats" placeholder="Categoría (embutidos)" aria-label="Categoría">
+      <datalist id="guardado-cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+      <button type="submit" class="boton">Guardar artículo</button>
+    </form>`;
+  }
+  $('#compra-guardados').innerHTML = `${html}</div>`;
+}
+
+function guardarArticuloNuevo() {
+  const campo = $('#guardado-texto');
+  const cat = $('#guardado-cat');
+  const r = C.guardarArticulo(datos.catalogo, campo.value, cat.value);
+  if (r.estado === 'vacio') { campo.focus(); return; }
+  if (r.estado === 'repetido') { aviso('Ya lo tenías guardado'); campo.select(); return; }
+  const antes = datos.catalogo;
+  datos.catalogo = r.catalogo;
+  if (!guardar()) { datos.catalogo = antes; return; }
+  const catPuesta = cat.value;
+  pintarGuardados();
+  aviso(r.estado === 'cambiado' ? 'Categoría cambiada' : 'Guardado en tus artículos');
+  $('#guardado-cat').value = catPuesta; // lo siguiente suele ser de la misma categoría
+  $('#guardado-texto').focus();
+}
+
+function usarGuardado(id) {
+  const g = datos.catalogo.find((x) => x.id === id);
+  if (!g) return;
+  const r = C.añadirArticulo(datos.compra, g.texto, Date.now(), g.categoria);
+  if (r.estado === 'repetido') { aviso('Ya está en la lista'); return; }
+  const antes = datos.compra;
+  datos.compra = r.lista;
+  if (!guardar()) { datos.compra = antes; return; }
+  pintarCompra();
+}
+
+function borrarGuardado(id) {
+  datos.catalogo = datos.catalogo.filter((x) => x.id !== id);
+  guardar();
+  if (!datos.catalogo.length) editandoGuardados = false;
+  pintarGuardados();
 }
 
 function marcarCompra(id) {
@@ -1687,6 +1752,7 @@ async function importar(archivo) {
   const guarda = [];
   if (!r.trae.eventos && datos.eventos.length) { r.datos.eventos = datos.eventos; guarda.push('el calendario'); }
   if (!r.trae.compra && datos.compra.length) { r.datos.compra = datos.compra; guarda.push('la lista de compra'); }
+  if (!r.trae.catalogo && datos.catalogo.length) { r.datos.catalogo = datos.catalogo; guarda.push('tus artículos de compra'); }
   const extra = [];
   if (r.trae.eventos && r.datos.eventos.length) extra.push(plural(r.datos.eventos.length, 'fecha en el calendario', 'fechas en el calendario'));
   if (r.trae.compra && r.datos.compra.length) extra.push(plural(r.datos.compra.length, 'cosa en la lista de compra', 'cosas en la lista de compra'));
@@ -1764,9 +1830,9 @@ async function borrarTodo() {
     si: 'Borrar todo',
   });
   if (!ok) return;
-  const { moneda, inicioAño, eventos, compra } = datos;
+  const { moneda, inicioAño, eventos, compra, catalogo } = datos;
   datos = C.datosIniciales();
-  Object.assign(datos, { moneda, inicioAño, eventos, compra }); // el calendario y la lista de compra se quedan
+  Object.assign(datos, { moneda, inicioAño, eventos, compra, catalogo }); // el calendario y la lista de compra se quedan
   guardar();
   aviso('Todo borrado');
   pintar();
@@ -1799,6 +1865,9 @@ document.addEventListener('click', (e) => {
     case 'compra-marcar': marcarCompra(el.dataset.id); break;
     case 'compra-borrar': borrarDeCompra(el.dataset.id); break;
     case 'compra-limpiar': limpiarCompra(); break;
+    case 'guardado-usar': usarGuardado(el.dataset.id); break;
+    case 'guardado-borrar': borrarGuardado(el.dataset.id); break;
+    case 'guardado-editar': editandoGuardados = !editandoGuardados; pintarGuardados(); break;
     case 'editar-mov': abrirMovimiento(el.dataset.id); break;
     case 'borrar-mov': borrarMovimiento(); break;
     case 'dividir-mov': mostrarDivision(true); break;
@@ -1913,6 +1982,7 @@ $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guarda
 $('#form-esperado').addEventListener('submit', (e) => { e.preventDefault(); guardarEsperado(); });
 $('#form-evento').addEventListener('submit', (e) => { e.preventDefault(); guardarEvento(); });
 $('#form-compra').addEventListener('submit', (e) => { e.preventDefault(); añadirCompra(); });
+$('#compra-guardados').addEventListener('submit', (e) => { e.preventDefault(); guardarArticuloNuevo(); });
 for (const r of document.querySelectorAll('#form-evento input[name="ev-tipo"]')) r.addEventListener('change', ajustarFormEvento);
 $('#ev-anual').addEventListener('change', () => { anualTocado = true; });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {

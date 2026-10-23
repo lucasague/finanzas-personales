@@ -52,6 +52,7 @@ export function datosIniciales() {
     iconosAuto: true, // ya se pusieron los iconos por el nombre (ver ponerIconos)
     eventos: [], // calendario: cumpleaños, eventos y fechas importantes
     compra: [], // lista de compra
+    catalogo: [], // artículos de compra guardados, con su categoría
   };
 }
 
@@ -384,9 +385,10 @@ export function validarCopia(obj) {
         // Hasta la versión 7 no había calendario ni lista de compra.
         eventos: validarEventos(obj.eventos),
         compra: validarCompra(obj.compra),
+        catalogo: validarCatalogo(obj.catalogo),
       },
       // Si la copia trae calendario y lista de compra (las de antes de la versión 7 no los traen).
-      trae: { eventos: Array.isArray(obj.eventos), compra: Array.isArray(obj.compra) },
+      trae: { eventos: Array.isArray(obj.eventos), compra: Array.isArray(obj.compra), catalogo: Array.isArray(obj.catalogo) },
       descartados,
     };
   } catch (e) {
@@ -1561,7 +1563,7 @@ function validarCompra(lista) {
     let id = typeof x.id === 'string' && x.id ? x.id : nuevoId();
     while (ids.has(id)) id = nuevoId();
     ids.add(id);
-    res.push({ id, texto: x.texto.trim().slice(0, 80), hecho: x.hecho === true, creado: Number.isFinite(x.creado) ? x.creado : 0 });
+    res.push({ id, texto: x.texto.trim().slice(0, 80), hecho: x.hecho === true, creado: Number.isFinite(x.creado) ? x.creado : 0, categoria: limpiarCategoriaCompra(x.categoria) });
   }
   return res;
 }
@@ -1571,14 +1573,14 @@ function validarCompra(lista) {
  * si estaba comprado, vuelve a "por comprar" al final. No toca lo que recibe: devuelve { lista, estado } con estado
  * 'nuevo', 'repetido', 'otra-vez' o 'vacio'.
  */
-export function añadirArticulo(lista, texto, ahora = Date.now()) {
+export function añadirArticulo(lista, texto, ahora = Date.now(), categoria = '') {
   const t = String(texto ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
   if (!t) return { lista, estado: 'vacio' };
   const clave = nombreComparable(t);
   const ya = lista.find((x) => nombreComparable(x.texto) === clave);
   if (ya && !ya.hecho) return { lista, estado: 'repetido' };
   if (ya) return { lista: [...lista.filter((x) => x !== ya), { ...ya, hecho: false, creado: ahora }], estado: 'otra-vez' };
-  return { lista: [...lista, { id: nuevoId(), texto: t, hecho: false, creado: ahora }], estado: 'nuevo' };
+  return { lista: [...lista, { id: nuevoId(), texto: t, hecho: false, creado: ahora, categoria: limpiarCategoriaCompra(categoria) }], estado: 'nuevo' };
 }
 
 /** Marca o desmarca un artículo como comprado. No toca lo que recibe. */
@@ -1594,4 +1596,55 @@ export function quitarComprados(lista) {
 /** Lo que falta por comprar y lo ya comprado, cada uno en el orden en que se apuntó. */
 export function ordenCompra(lista) {
   return { pendientes: lista.filter((x) => !x.hecho), comprados: lista.filter((x) => x.hecho) };
+}
+
+// ---------- Artículos guardados de la compra (v0.19) ----------
+// Un catálogo: [{ id, texto, categoria }]. La categoría es un nombre libre ("Embutidos", "Carnes"); vacía = sin categoría.
+
+function limpiarCategoriaCompra(c) {
+  return typeof c === 'string' ? c.replace(/\s+/g, ' ').trim().slice(0, 30) : '';
+}
+
+function validarCatalogo(lista) {
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  const res = [];
+  for (const x of lista) {
+    if (!x || typeof x.texto !== 'string' || !x.texto.trim()) continue;
+    let id = typeof x.id === 'string' && x.id ? x.id : nuevoId();
+    while (ids.has(id)) id = nuevoId();
+    ids.add(id);
+    res.push({ id, texto: x.texto.trim().slice(0, 80), categoria: limpiarCategoriaCompra(x.categoria) });
+  }
+  return res;
+}
+
+/**
+ * Guarda un artículo en el catálogo. Si ya estaba (mismo nombre sin mayúsculas ni tildes), solo le cambia la categoría.
+ * No toca lo que recibe: devuelve { catalogo, estado } con estado 'nuevo', 'cambiado', 'repetido' o 'vacio'.
+ */
+export function guardarArticulo(catalogo, texto, categoria) {
+  const t = String(texto ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!t) return { catalogo, estado: 'vacio' };
+  const cat = limpiarCategoriaCompra(categoria);
+  const clave = nombreComparable(t);
+  const ya = catalogo.find((x) => nombreComparable(x.texto) === clave);
+  if (!ya) return { catalogo: [...catalogo, { id: nuevoId(), texto: t, categoria: cat }], estado: 'nuevo' };
+  if (ya.categoria === cat) return { catalogo, estado: 'repetido' };
+  return { catalogo: catalogo.map((x) => (x === ya ? { ...x, categoria: cat } : x)), estado: 'cambiado' };
+}
+
+/** Agrupa artículos (del catálogo o de la lista) por categoría: [{ categoria, items }], categorías por orden alfabético y "sin categoría" al final. */
+export function agruparPorCategoria(items) {
+  const mapa = new Map();
+  for (const x of items) {
+    const c = x.categoria || '';
+    if (!mapa.has(c)) mapa.set(c, []);
+    mapa.get(c).push(x);
+  }
+  const claves = [...mapa.keys()].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b, 'es')));
+  return claves.map((categoria) => ({
+    categoria,
+    items: mapa.get(categoria).slice().sort((a, b) => a.texto.localeCompare(b.texto, 'es')),
+  }));
 }

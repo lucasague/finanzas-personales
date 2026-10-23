@@ -438,3 +438,16 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .articulo.hecho .caja { background: var(--acento); border-color: var(--acento); color: var(--acento-texto); }
 .articulo.hecho .art-texto { text-decoration: line-through; color: var(--texto-suave); }
 .art-borrar { font-size: 1rem; flex: none; }
+.compra-cat { margin: 12px 0 2px; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); }
+.compra-cat:first-of-type { margin-top: 4px; }
+.chips-art { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.chip-art {
+  min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--borde);
+  background: var(--superficie); font-size: .95rem;
+}
+.chip-art.puesto { background: var(--acento); border-color: var(--acento); color: var(--acento-texto); }
+.chip-art.quitar { border-style: dashed; }
+.guardado-form { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.guardado-form input {
+  min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--borde); background: var(--superficie);
+}
