@@ -298,6 +298,30 @@ export function netoPorCuenta(movs, clave, cuentas) {
     .map((f) => ({ cuenta: f.cuenta, ingresos: f.ingresos, gastos: f.gastos, neto: f.ingresos - f.gastos }));
 }
 
+/**
+ * Saldo de cada cuenta hoy: lo que había al empezar (`saldoInicial`, puede ser negativo) más todos sus ingresos y
+ * menos todos sus gastos, sin mirar el mes. Recibe movimientos ya pasados por enMonedaBase. Los de cuentas
+ * borradas o sin cuenta van a "Sin cuenta", que solo sale si los hay.
+ */
+export function saldosPorCuenta(movs, cuentas) {
+  const porId = new Map(cuentas.map((c) => [c.id, { cuenta: c, saldo: c.saldoInicial || 0, n: 0 }]));
+  const huerfana = { cuenta: { id: null, nombre: 'Sin cuenta', tipo: null }, saldo: 0, n: 0 };
+  for (const m of movs) {
+    const fila = porId.get(m.cuenta) || huerfana;
+    fila.saldo += m.tipo === 'ingreso' ? m.importe : -m.importe;
+    fila.n++;
+  }
+  return [...porId.values(), huerfana].filter((f) => f.cuenta.id !== null || f.n > 0);
+}
+
+/** Como parseImporteOCero, pero acepta un menos delante: el saldo de una tarjeta puede ser una deuda. */
+export function parseSaldo(texto) {
+  const t = String(texto ?? '').trim();
+  const neg = /^[^\d]*[-−–]/.test(t);
+  const v = parseImporteOCero(t.replace(/[-−–]/g, ''));
+  return v == null ? null : (neg ? -v : v);
+}
+
 /** Comprueba una copia importada (o lo guardado) y la normaliza. Nunca lanza. */
 export function validarCopia(obj) {
   try {
@@ -339,6 +363,8 @@ export function validarCopia(obj) {
           id: c.id,
           nombre: typeof c.nombre === 'string' && c.nombre.trim() ? c.nombre.trim().slice(0, 40) : 'Sin nombre',
           tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'efectivo',
+          // Hasta la versión 7 las cuentas no tenían saldo de partida.
+          ...(Number.isInteger(c.saldoInicial) && c.saldoInicial !== 0 ? { saldoInicial: c.saldoInicial } : {}),
         });
       }
     } else {

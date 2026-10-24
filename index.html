@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="ad9db94069">
+  <meta name="version" content="0dde751265">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -256,6 +256,11 @@
         <label><input type="radio" name="cuenta-tipo" value="debito"><span>💳 Débito</span></label>
         <label><input type="radio" name="cuenta-tipo" value="credito"><span>🏦 Crédito</span></label>
       </div>
+      <label class="campo">
+        <span>Cuánto tiene ahora (saldo de partida)</span>
+        <input id="cuenta-saldo" inputmode="decimal" autocomplete="off" placeholder="0">
+      </label>
+      <p class="explica">Pon lo que hay hoy en la cuenta. Si es una deuda (tarjeta de crédito), con un menos delante: -2000. Desde ahí la app suma y resta lo que apuntes.</p>
       <p class="error" id="cuenta-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cuenta" id="cuenta-borrar" hidden>Borrar</button>
