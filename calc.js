@@ -300,15 +300,18 @@ export function netoPorCuenta(movs, clave, cuentas) {
 
 /**
  * Saldo de cada cuenta hoy: lo que había al empezar (`saldoInicial`, puede ser negativo) más todos sus ingresos y
- * menos todos sus gastos, sin mirar el mes. Recibe movimientos ya pasados por enMonedaBase. Los de cuentas
+ * menos todos sus gastos, sin mirar el mes. Cada cuenta va en su moneda (`moneda`, por defecto la principal); lo apuntado en otra se convierte. Los de cuentas
  * borradas o sin cuenta van a "Sin cuenta", que solo sale si los hay.
  */
-export function saldosPorCuenta(movs, cuentas) {
-  const porId = new Map(cuentas.map((c) => [c.id, { cuenta: c, saldo: c.saldoInicial || 0, n: 0 }]));
-  const huerfana = { cuenta: { id: null, nombre: 'Sin cuenta', tipo: null }, saldo: 0, n: 0 };
-  for (const m of movs) {
+export function saldosPorCuenta(movimientos, cuentas, base = 'MXN') {
+  const tasas = tasasImplicitas(movimientos);
+  const porId = new Map(cuentas.map((c) => [c.id, { cuenta: c, moneda: c.moneda || base, saldo: c.saldoInicial || 0, n: 0, sinConvertir: 0 }]));
+  const huerfana = { cuenta: { id: null, nombre: 'Sin cuenta', tipo: null }, moneda: base, saldo: 0, n: 0, sinConvertir: 0 };
+  for (const m of movimientos) {
     const fila = porId.get(m.cuenta) || huerfana;
-    fila.saldo += m.tipo === 'ingreso' ? m.importe : -m.importe;
+    const v = valorEn(m, fila.moneda, tasas);
+    if (v == null) { fila.sinConvertir++; continue; }
+    fila.saldo += m.tipo === 'ingreso' ? v : -v;
     fila.n++;
   }
   return [...porId.values(), huerfana].filter((f) => f.cuenta.id !== null || f.n > 0);
@@ -364,6 +367,7 @@ export function validarCopia(obj) {
           nombre: typeof c.nombre === 'string' && c.nombre.trim() ? c.nombre.trim().slice(0, 40) : 'Sin nombre',
           tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'efectivo',
           // Hasta la versión 7 las cuentas no tenían saldo de partida.
+          ...(MONEDAS[c.moneda] ? { moneda: c.moneda } : {}),
           ...(Number.isInteger(c.saldoInicial) && c.saldoInicial !== 0 ? { saldoInicial: c.saldoInicial } : {}),
         });
       }

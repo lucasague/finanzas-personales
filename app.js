@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '0dde751265';
+const BUILD = '8432f1d1ff';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -174,9 +174,11 @@ function pintarResumen() {
     html += pistaDesglose(filas) + barrasCategorias(filas);
     html += `</div>`;
   }
-  const saldos = C.saldosPorCuenta(movs, datos.cuentas);
+  const saldos = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda);
   if (saldos.length) {
-    const total = saldos.reduce((s, f) => s + f.saldo, 0);
+    const totales = new Map();
+    for (const f of saldos) totales.set(f.moneda, (totales.get(f.moneda) || 0) + f.saldo);
+    const cifra = (c, mon) => `${c < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(c), mon)}`;
     html += `<div class="tarjeta"><h2>Saldo de cada cuenta</h2>
       <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado. Para ajustarlo, edita la cuenta en Ajustes.</p>`;
     for (const f of saldos) {
@@ -184,11 +186,12 @@ function pintarResumen() {
         <div class="cat-fila">
           <div class="cat-linea">
             <span class="cat-nombre">${esc(emojiCuenta(f.cuenta))} ${esc(f.cuenta.nombre)}</span>
-            <span class="cuenta-neto ${f.saldo < 0 ? 'gasto' : 'ingreso'}">${f.saldo < 0 ? '−' : ''}${esc(dinero(Math.abs(f.saldo)))}</span>
+            <span class="cuenta-neto ${f.saldo < 0 ? 'gasto' : 'ingreso'}">${esc(cifra(f.saldo, f.moneda))}</span>
           </div>
+          ${f.sinConvertir ? `<p class="subtitulo">${esc(plural(f.sinConvertir, 'movimiento', 'movimientos'))} en otra moneda sin tipo de cambio: no cuenta aún.</p>` : ''}
         </div>`;
     }
-    if (saldos.length > 1) html += `<p class="subtitulo">Total: <strong>${total < 0 ? '−' : ''}${esc(dinero(Math.abs(total)))}</strong></p>`;
+    if (saldos.length > 1) html += `<p class="subtitulo">Total: <strong>${esc([...totales].map(([mon, t]) => cifra(t, mon)).join(' + '))}</strong></p>`;
     html += `</div>`;
   }
   const cuentas = C.netoPorCuenta(movs, mes, datos.cuentas);
@@ -1276,10 +1279,16 @@ function abrirCuenta(id = null) {
   $('#cuenta-nombre').value = c ? c.nombre : '';
   document.querySelector(`#form-cuenta input[name="cuenta-tipo"][value="${c ? c.tipo : 'efectivo'}"]`).checked = true;
   $('#cuenta-saldo').value = c && c.saldoInicial ? (c.saldoInicial < 0 ? '-' : '') + C.importeEditable(Math.abs(c.saldoInicial)) : '';
+  pintarMonedaCuenta(c?.moneda || datos.moneda);
   $('#cuenta-borrar').hidden = !c;
   $('#cuenta-error').hidden = true;
   $('#dlg-cuenta').showModal();
   if (!c) setTimeout(() => $('#cuenta-nombre').focus(), 50);
+}
+
+function pintarMonedaCuenta(moneda) {
+  $('#cuenta-moneda').innerHTML = Object.keys(C.MONEDAS)
+    .map((cod) => `<label><input type="radio" name="cuenta-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
 }
 
 function guardarCuenta() {
@@ -1287,14 +1296,15 @@ function guardarCuenta() {
   const err = $('#cuenta-error');
   if (!nombre) { err.textContent = 'Ponle un nombre.'; err.hidden = false; return; }
   const tipo = document.querySelector('#form-cuenta input[name="cuenta-tipo"]:checked').value;
+  const moneda = document.querySelector('#cuenta-moneda input:checked')?.value || datos.moneda;
   const textoSaldo = $('#cuenta-saldo').value.trim();
   const saldoInicial = textoSaldo ? C.parseSaldo(textoSaldo) : 0;
   if (saldoInicial == null) { err.textContent = 'El saldo no se entiende. Escribe solo el número, por ejemplo 1500 o -2000.'; err.hidden = false; return; }
   if (editandoCuenta) {
     const c = datos.cuentas.find((x) => x.id === editandoCuenta);
-    if (c) Object.assign(c, { nombre, tipo, saldoInicial });
+    if (c) Object.assign(c, { nombre, tipo, moneda, saldoInicial });
   } else {
-    datos.cuentas.push({ id: C.nuevoId(), nombre, tipo, saldoInicial });
+    datos.cuentas.push({ id: C.nuevoId(), nombre, tipo, moneda, saldoInicial });
   }
   if (!guardar()) return;
   $('#dlg-cuenta').close();

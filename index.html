@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="0dde751265">
+  <meta name="version" content="8432f1d1ff">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -256,6 +256,8 @@
         <label><input type="radio" name="cuenta-tipo" value="debito"><span>💳 Débito</span></label>
         <label><input type="radio" name="cuenta-tipo" value="credito"><span>🏦 Crédito</span></label>
       </div>
+      <p class="etiqueta-moneda">Moneda de la cuenta</p>
+      <div class="segmentado monedas" id="cuenta-moneda" role="radiogroup" aria-label="Moneda de la cuenta"></div>
       <label class="campo">
         <span>Cuánto tiene ahora (saldo de partida)</span>
         <input id="cuenta-saldo" inputmode="decimal" autocomplete="off" placeholder="0">
