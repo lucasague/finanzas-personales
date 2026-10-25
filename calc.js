@@ -35,7 +35,7 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 8;
+export const VERSION_DATOS = 9;
 export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
@@ -47,6 +47,7 @@ export function datosIniciales() {
     cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
     transferencias: [], // dinero que pasa de una cuenta propia a otra: no es gasto ni ingreso (ver "Transferencias")
+    deudas: [], // lo que se debe, con sus abonos: no son cuentas ni cuentan como gasto ni ingreso (ver "Deudas")
     sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
     esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
     esperadosMes: [], // lo esperado de un mes concreto, cuando no es lo habitual
@@ -436,6 +437,8 @@ export function validarCopia(obj) {
         version: VERSION_DATOS, moneda, inicioAño, categorias: normalizarArbol(categorias), cuentas, movimientos,
         // Hasta la versión 8 no había transferencias entre cuentas.
         transferencias: validarTransferencias(obj.transferencias, moneda),
+        // Hasta la versión 9 no había deudas.
+        deudas: validarDeudas(obj.deudas, moneda),
         sinColocar: Array.isArray(obj.sinColocar) ? [...new Set(obj.sinColocar.filter((x) => ids.has(x)))] : [],
         // Hasta la versión 5 no había ingreso esperado.
         esperados: validarEsperados(obj.esperados),
@@ -448,7 +451,7 @@ export function validarCopia(obj) {
         catalogo: validarCatalogo(obj.catalogo),
       },
       // Si la copia trae calendario y lista de compra (las de antes de la versión 7 no los traen).
-      trae: { eventos: Array.isArray(obj.eventos), compra: Array.isArray(obj.compra), catalogo: Array.isArray(obj.catalogo) },
+      trae: { eventos: Array.isArray(obj.eventos), compra: Array.isArray(obj.compra), catalogo: Array.isArray(obj.catalogo), deudas: Array.isArray(obj.deudas) },
       descartados,
     };
   } catch (e) {
@@ -494,6 +497,128 @@ function validarTransferencias(lista, monedaApp) {
       llega: t.llega, monedaLlega: MONEDAS[t.monedaLlega] ? t.monedaLlega : monedaApp,
       nota: typeof t.nota === 'string' ? t.nota.trim().slice(0, 200) : '',
       creado: Number.isFinite(t.creado) ? t.creado : 0,
+    });
+  }
+  return res;
+}
+
+// ---------- Deudas (v0.25) ----------
+// { id, nombre, moneda, inicial, nota, creado, abonos: [{ id, fecha, importe, nota, creado, movimiento? }] }:
+// `inicial` es lo que se debía al apuntarla y cada abono (en la moneda de la deuda) lo va bajando. No son cuentas ni
+// cuentan como gasto ni ingreso: no tocan el saldo de las cuentas ni los totales. Si un abono se apunta también como
+// gasto de una cuenta, `movimiento` es el id de ese gasto (un movimiento normal).
+
+/** Lo abonado hasta hoy, en céntimos de la moneda de la deuda. */
+export function abonadoDeuda(d) {
+  return (d.abonos || []).reduce((s, a) => s + a.importe, 0);
+}
+
+/** Lo que queda por pagar; nunca menos de cero (si se abonó de más, queda en 0: pagada). */
+export function quedaDeuda(d) {
+  return Math.max(0, d.inicial - abonadoDeuda(d));
+}
+
+/** Lo abonado por encima de lo que se debía (0 si no). */
+export function deMasDeuda(d) {
+  return Math.max(0, abonadoDeuda(d) - d.inicial);
+}
+
+export function deudaPagada(d) {
+  return quedaDeuda(d) === 0;
+}
+
+/** Las deudas por pagar (en el orden en que se apuntaron) y las ya pagadas, aparte. */
+export function ordenarDeudas(deudas) {
+  const lista = deudas || [];
+  return { pendientes: lista.filter((d) => !deudaPagada(d)), pagadas: lista.filter(deudaPagada) };
+}
+
+/** Lo que queda por pagar sumado por moneda, sin mezclar: [{ moneda, queda }], solo monedas con algo pendiente. */
+export function totalesDeudas(deudas) {
+  const porMoneda = new Map();
+  for (const d of deudas || []) {
+    const q = quedaDeuda(d);
+    if (q > 0) porMoneda.set(d.moneda, (porMoneda.get(d.moneda) || 0) + q);
+  }
+  return [...porMoneda].map(([moneda, queda]) => ({ moneda, queda }));
+}
+
+/** Abonos de una deuda, los más recientes primero. */
+export function abonosOrdenados(d) {
+  return [...(d.abonos || [])].sort((x, y) => y.fecha.localeCompare(x.fecha) || (y.creado || 0) - (x.creado || 0));
+}
+
+/** Lo que falla de una deuda antes de guardarla, en palabras de la persona; null si está bien. */
+export function comprobarDeuda({ nombre, inicial }) {
+  if (!nombre || !String(nombre).trim()) return 'Ponle un nombre (por ejemplo, el préstamo del coche).';
+  if (!Number.isInteger(inicial) || inicial <= 0) return 'Escribe cuánto se debe (mayor que cero).';
+  return null;
+}
+
+/** Lo que falla de un abono antes de guardarlo; null si está bien. */
+export function comprobarAbono({ importe, fecha, cuenta, conGasto = false }) {
+  if (!Number.isInteger(importe) || importe <= 0) return 'Escribe cuánto abonas (mayor que cero).';
+  if (!esFechaISO(fecha)) return 'Elige una fecha.';
+  if (conGasto && !cuenta) return 'Elige de qué cuenta salió el dinero.';
+  return null;
+}
+
+/**
+ * Un abono nuevo para la deuda `d`. Con `cuenta`, además el gasto normal en esa cuenta (en la moneda de la deuda,
+ * con la categoría elegida o sin ella), enlazado al abono por su id. No toca `d`: devuelve { abono, movimiento }.
+ */
+export function nuevoAbono(d, { importe, fecha, nota = '' }, { cuenta = null, categoria = null } = {}, ahora = Date.now()) {
+  const limpia = String(nota || '').trim().slice(0, 200);
+  const abono = { id: nuevoId(), fecha, importe, nota: limpia, creado: ahora };
+  if (!cuenta) return { abono, movimiento: null };
+  const movimiento = {
+    id: nuevoId(), tipo: 'gasto', importe, moneda: d.moneda, importeBase: null, monedaBase: null,
+    categoria: categoria || null, cuenta, nota: `Abono a ${d.nombre}${limpia ? ` · ${limpia}` : ''}`.slice(0, 200),
+    fecha, creado: ahora,
+  };
+  abono.movimiento = movimiento.id;
+  return { abono, movimiento };
+}
+
+/**
+ * "Pasar a Deudas" una cuenta: la deuda que se propone con su nombre y moneda. Si el saldo es negativo, lo que se
+ * debe es ese saldo en positivo; si no, `propuesto` es null y hay que preguntarlo.
+ */
+export function deudaDesdeCuenta(cuenta, saldo, base = 'MXN') {
+  return { nombre: cuenta.nombre, moneda: cuenta.moneda || base, propuesto: saldo < 0 ? -saldo : null };
+}
+
+function validarDeudas(lista, monedaApp) {
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  const res = [];
+  for (const d of lista) {
+    if (!d || !Number.isInteger(d.inicial) || d.inicial <= 0) continue;
+    let id = typeof d.id === 'string' && d.id ? d.id : nuevoId();
+    while (ids.has(id)) id = nuevoId();
+    ids.add(id);
+    const idsA = new Set();
+    const abonos = [];
+    for (const a of Array.isArray(d.abonos) ? d.abonos : []) {
+      if (!a || !Number.isInteger(a.importe) || a.importe <= 0 || !esFechaISO(a.fecha)) continue;
+      let idA = typeof a.id === 'string' && a.id ? a.id : nuevoId();
+      while (idsA.has(idA)) idA = nuevoId();
+      idsA.add(idA);
+      abonos.push({
+        id: idA, fecha: a.fecha, importe: a.importe,
+        nota: typeof a.nota === 'string' ? a.nota.trim().slice(0, 200) : '',
+        creado: Number.isFinite(a.creado) ? a.creado : 0,
+        ...(typeof a.movimiento === 'string' && a.movimiento ? { movimiento: a.movimiento } : {}),
+      });
+    }
+    res.push({
+      id,
+      nombre: typeof d.nombre === 'string' && d.nombre.trim() ? d.nombre.trim().slice(0, 40) : 'Sin nombre',
+      moneda: MONEDAS[d.moneda] ? d.moneda : monedaApp,
+      inicial: d.inicial,
+      nota: typeof d.nota === 'string' ? d.nota.trim().slice(0, 200) : '',
+      creado: Number.isFinite(d.creado) ? d.creado : 0,
+      abonos,
     });
   }
   return res;

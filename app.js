@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'b1335c7983';
+const BUILD = '15ed763bc2';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -14,6 +14,8 @@ let editandoTrans = null; // id de la transferencia en edición, o null si es nu
 let llegaTocado = false; // si la persona ha escrito a mano cuánto llega en una transferencia
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
 let editandoCuenta = null; // id de la cuenta en edición, o null si es nueva
+let editandoDeuda = null; // id de la deuda abierta, o null si es nueva
+let volverADeuda = false; // al cerrar la hoja de un abono, se vuelve a la ficha de su deuda
 let editandoEsperado = null; // grupo del ingreso esperado en edición, o null si es nuevo
 let ultimaCategoria = { gasto: null, ingreso: null };
 let ultimaMoneda = null;
@@ -196,6 +198,7 @@ function pintarResumen() {
     if (saldos.length > 1) html += `<p class="subtitulo">Total: <strong>${esc([...totales].map(([mon, t]) => cifra(t, mon)).join(' + '))}</strong></p>`;
     html += `</div>`;
   }
+  html += tarjetaDeudas();
   const cuentas = C.netoPorCuenta(movs, mes, datos.cuentas);
   if (cuentas.length) {
     html += `<div class="tarjeta"><h2>Por cuenta</h2>
@@ -628,7 +631,7 @@ function pintarAjustes() {
     </div>
     <div class="tarjeta">
       <h2>Copia de seguridad</h2>
-      <p class="explica">Tus datos solo están en este móvil. Guarda una copia de vez en cuando (por ejemplo, mándatela por correo) para no perderlos si cambias de teléfono. La copia lleva también el calendario y la lista de compra.</p>
+      <p class="explica">Tus datos solo están en este móvil. Guarda una copia de vez en cuando (por ejemplo, mándatela por correo) para no perderlos si cambias de teléfono. La copia lleva también tus deudas, el calendario y la lista de compra.</p>
       <div class="botones-col">
         <button type="button" class="boton" data-accion="exportar">Guardar una copia</button>
         <button type="button" class="boton" data-accion="importar">Recuperar desde una copia</button>
@@ -1422,6 +1425,8 @@ function abrirCuenta(id = null) {
     pintarAvisoHoy(f.sinConvertir);
   }
   $('#cuenta-borrar').hidden = !c;
+  $('#cuenta-a-deuda').hidden = !c;
+  $('#cuenta-deuda-bloque').hidden = true;
   $('#cuenta-error').hidden = true;
   $('#dlg-cuenta').showModal();
   if (!c) setTimeout(() => $('#cuenta-nombre').focus(), 50);
@@ -1487,28 +1492,272 @@ async function guardarCuenta({ desdeHoy = false } = {}) {
   });
 }
 
-async function borrarCuenta() {
-  const id = editandoCuenta;
-  const c = datos.cuentas.find((x) => x.id === id);
+/** Qué pasa con los movimientos y pasos entre cuentas de una cuenta que se quita, en palabras de la persona. */
+function textoQuitarCuenta(id) {
   const usos = datos.movimientos.filter((m) => m.cuenta === id).length;
   const pasos = datos.transferencias.filter((t) => t.desde === id || t.hacia === id).length;
-  $('#dlg-cuenta').close();
-  const ok = await confirmar({
-    titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
-    texto: (usos
-      ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: quedarán «Sin cuenta».`
-      : 'No tiene movimientos.')
-      + (pasos ? ` Tiene también ${plural(pasos, 'paso', 'pasos')} entre cuentas: se quedan, con «Sin cuenta» en su lugar.` : ''),
-    si: 'Borrar',
-  });
-  if (!ok) { abrirCuenta(id); return; }
+  return (usos
+    ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: quedarán «Sin cuenta».`
+    : 'No tiene movimientos.')
+    + (pasos ? ` Tiene también ${plural(pasos, 'paso', 'pasos')} entre cuentas: se quedan, con «Sin cuenta» en su lugar.` : '');
+}
+
+/** Quita la cuenta: sus movimientos y pasos entre cuentas se quedan, con «Sin cuenta». No guarda. */
+function quitarCuenta(id) {
   datos.cuentas = datos.cuentas.filter((x) => x.id !== id);
   for (const m of datos.movimientos) if (m.cuenta === id) m.cuenta = null;
   for (const t of datos.transferencias) { if (t.desde === id) t.desde = null; if (t.hacia === id) t.hacia = null; }
   if (ultimaCuenta === id) ultimaCuenta = null;
+}
+
+async function borrarCuenta() {
+  const id = editandoCuenta;
+  const c = datos.cuentas.find((x) => x.id === id);
+  $('#dlg-cuenta').close();
+  const ok = await confirmar({
+    titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
+    texto: textoQuitarCuenta(id),
+    si: 'Borrar',
+  });
+  if (!ok) { abrirCuenta(id); return; }
+  quitarCuenta(id);
   guardar();
   aviso('Cuenta borrada');
   pintar();
+}
+
+// "Pasar a Deudas": la cuenta se convierte en una deuda con su nombre y su moneda. Lo que se debe se propone con el
+// saldo de la cuenta si es negativo; si no, hay que escribirlo.
+function mostrarCuentaADeuda() {
+  const c = datos.cuentas.find((x) => x.id === editandoCuenta);
+  if (!c) return;
+  const f = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda, datos.transferencias).find((x) => x.cuenta.id === c.id);
+  const p = C.deudaDesdeCuenta(c, f ? f.saldo : 0, datos.moneda);
+  $('#cuenta-a-deuda').hidden = true;
+  $('#cuenta-deuda-bloque').hidden = false;
+  $('#cuenta-deuda-error').hidden = true;
+  $('#cuenta-deuda-etiqueta').textContent = `Cuánto debes hoy (en ${nombreCorto[p.moneda] || p.moneda})`;
+  $('#cuenta-deuda-importe').value = p.propuesto ? C.importeEditable(p.propuesto) : '';
+  $('#cuenta-deuda-explica').textContent = p.propuesto
+    ? 'Es lo que la cuenta marca hoy en negativo. Si no es lo que debes, cámbialo.'
+    : 'Esta cuenta no está en negativo, así que escribe tú cuánto debes.';
+  setTimeout(() => $('#cuenta-deuda-importe').focus(), 50);
+}
+
+async function pasarCuentaADeuda() {
+  const id = editandoCuenta;
+  const c = datos.cuentas.find((x) => x.id === id);
+  if (!c) return;
+  const inicial = C.parseImporte($('#cuenta-deuda-importe').value);
+  if (inicial == null) {
+    $('#cuenta-deuda-error').textContent = 'Escribe cuánto debes (mayor que cero), por ejemplo 1500.';
+    $('#cuenta-deuda-error').hidden = false;
+    return;
+  }
+  const moneda = c.moneda || datos.moneda;
+  $('#dlg-cuenta').close();
+  const ok = await confirmar({
+    titulo: `¿Pasar «${c.nombre}» a Deudas?`,
+    texto: `Se apunta la deuda «${c.nombre}» con ${C.formatoMoneda(inicial, moneda)} por pagar y la cuenta desaparece. ${textoQuitarCuenta(id)} La deuda la verás en el Resumen, y tocándola apuntas cada abono.`,
+    si: 'Pasar a Deudas',
+    peligro: false,
+  });
+  if (!ok) { abrirCuenta(id); mostrarCuentaADeuda(); $('#cuenta-deuda-importe').value = C.importeEditable(inicial); return; }
+  datos.deudas.push({ id: C.nuevoId(), nombre: c.nombre, moneda, inicial, nota: '', creado: Date.now(), abonos: [] });
+  quitarCuenta(id);
+  if (!guardar()) return;
+  vista = 'resumen';
+  aviso(`Listo: «${c.nombre}» ya está en Deudas`);
+  pintar();
+}
+
+// ---------- Deudas ----------
+// En el Resumen, debajo del saldo de cada cuenta. No son cuentas: no cuentan como gasto ni ingreso ni tocan saldos.
+
+const deuda = (id) => datos.deudas.find((d) => d.id === id);
+const cifraDeuda = (d) => C.formatoMoneda(C.quedaDeuda(d), d.moneda);
+
+function tarjetaDeudas() {
+  const { pendientes, pagadas } = C.ordenarDeudas(datos.deudas);
+  const fila = (d) => {
+    const pagada = C.deudaPagada(d);
+    const abonado = C.abonadoDeuda(d);
+    const detalle = pagada ? `Eran ${C.formatoMoneda(d.inicial, d.moneda)}`
+      : abonado ? `Eran ${C.formatoMoneda(d.inicial, d.moneda)} · llevas ${C.formatoMoneda(abonado, d.moneda)} abonado`
+        : 'Sin abonos todavía';
+    return `
+    <button type="button" class="cat-edit${pagada ? ' pagada' : ''}" data-accion="editar-deuda" data-id="${esc(d.id)}">
+      <span class="texto"><span class="nombre-deuda">${esc(d.nombre)}</span><br><span class="detalle">${esc(detalle)}</span></span>
+      <span class="importe ${pagada ? 'ingreso' : 'gasto'}">${pagada ? 'Pagada' : esc(cifraDeuda(d))}</span>
+      <span class="flecha" aria-hidden="true">›</span>
+    </button>`;
+  };
+  let html = `<div class="tarjeta"><h2>Deudas</h2>
+    <p class="explica">${datos.deudas.length
+    ? 'Lo que queda por pagar de cada una. Toca una para apuntar un abono.'
+    : 'Lo que debes (un préstamo, el carro…), con lo que queda por pagar. No cuenta como gasto ni cambia tus cuentas.'}</p>`;
+  html += pendientes.map(fila).join('');
+  const totales = C.totalesDeudas(datos.deudas);
+  if (pendientes.length > 1) html += `<p class="subtitulo">Total que debes: <strong>${esc(totales.map((t) => C.formatoMoneda(t.queda, t.moneda)).join(' + '))}</strong></p>`;
+  if (pagadas.length) html += `<h3 class="grupo-titulo">Pagadas</h3>${pagadas.map(fila).join('')}`;
+  html += `<button type="button" class="boton-linea" data-accion="nueva-deuda">+ Añadir deuda</button></div>`;
+  return html;
+}
+
+function abrirDeuda(id = null) {
+  editandoDeuda = id;
+  const d = id ? deuda(id) : null;
+  if (id && !d) { editandoDeuda = null; return; }
+  $('#dlg-deuda-titulo').textContent = d ? d.nombre : 'Nueva deuda';
+  $('#deuda-ficha').hidden = !d;
+  $('#deuda-borrar').hidden = !d;
+  $('#deuda-error').hidden = true;
+  $('#deuda-nombre').value = d ? d.nombre : '';
+  $('#deuda-inicial').value = d ? C.importeEditable(d.inicial) : '';
+  $('#deuda-nota').value = d ? d.nota : '';
+  $('#deuda-inicial-etiqueta').textContent = d ? 'Cuánto debías al apuntarla' : 'Cuánto debes hoy';
+  pintarMonedaDeuda(d ? d.moneda : datos.moneda);
+  if (d) pintarFichaDeuda(d);
+  $('#dlg-deuda').showModal();
+  if (!d) setTimeout(() => $('#deuda-nombre').focus(), 50);
+}
+
+function pintarMonedaDeuda(moneda) {
+  $('#deuda-moneda').innerHTML = Object.keys(C.MONEDAS)
+    .map((cod) => `<label><input type="radio" name="deuda-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
+}
+
+function pintarFichaDeuda(d) {
+  const pagada = C.deudaPagada(d);
+  const abonado = C.abonadoDeuda(d);
+  const deMas = C.deMasDeuda(d);
+  $('#deuda-queda-etiqueta').textContent = pagada ? 'Ya está pagada' : 'Queda por pagar';
+  $('#deuda-queda').textContent = pagada ? 'Pagada' : cifraDeuda(d);
+  $('#deuda-queda').classList.toggle('pagada', pagada);
+  $('#deuda-cuentas').textContent = `Debías ${C.formatoMoneda(d.inicial, d.moneda)} y llevas ${C.formatoMoneda(abonado, d.moneda)} abonado.`
+    + (deMas ? ` Abonaste ${C.formatoMoneda(deMas, d.moneda)} de más.` : '');
+  const abonos = C.abonosOrdenados(d);
+  const restado = (a) => {
+    const m = a.movimiento && datos.movimientos.find((x) => x.id === a.movimiento);
+    return m ? `restado de ${cuenta(m.cuenta).nombre}` : '';
+  };
+  $('#deuda-abonos').innerHTML = abonos.length ? abonos.map((a) => {
+    const detalle = [a.nota, restado(a)].filter(Boolean).join(' · ');
+    return `
+    <li class="abono-fila">
+      <span class="texto">${esc(C.fechaDMA(a.fecha))}${detalle ? `<span class="detalle">${esc(detalle)}</span>` : ''}</span>
+      <span class="importe">${esc(C.formatoMoneda(a.importe, d.moneda))}</span>
+      <button type="button" class="quitar" data-accion="borrar-abono" data-id="${esc(a.id)}" aria-label="Borrar este abono">✕</button>
+    </li>`;
+  }).join('') : '<li class="subtitulo">Ninguno todavía.</li>';
+}
+
+function guardarDeuda() {
+  const nombre = $('#deuda-nombre').value.trim().slice(0, 40);
+  const inicial = C.parseImporte($('#deuda-inicial').value);
+  const err = $('#deuda-error');
+  const fallo = C.comprobarDeuda({ nombre, inicial });
+  if (fallo) { err.textContent = fallo; err.hidden = false; return; }
+  const campos = {
+    nombre, inicial,
+    moneda: document.querySelector('#deuda-moneda input:checked')?.value || datos.moneda,
+    nota: $('#deuda-nota').value.trim().slice(0, 200),
+  };
+  const d = editandoDeuda ? deuda(editandoDeuda) : null;
+  if (d) Object.assign(d, campos);
+  else datos.deudas.push({ id: C.nuevoId(), creado: Date.now(), abonos: [], ...campos });
+  if (!guardar()) return;
+  $('#dlg-deuda').close();
+  aviso(d ? 'Cambios guardados' : 'Deuda apuntada');
+  pintar();
+}
+
+async function borrarDeuda() {
+  const id = editandoDeuda;
+  const d = deuda(id);
+  if (!d) return;
+  const conGasto = d.abonos.filter((a) => a.movimiento && datos.movimientos.some((m) => m.id === a.movimiento)).length;
+  $('#dlg-deuda').close();
+  const ok = await confirmar({
+    titulo: `¿Borrar la deuda «${d.nombre}»?`,
+    texto: `${d.abonos.length ? `Se borra con ${d.abonos.length === 1 ? 'su abono' : `sus ${d.abonos.length} abonos`}.` : 'Se borra.'} No se puede deshacer.`
+      + (conGasto ? ` Los gastos que apuntaste en tus cuentas al abonar se quedan.` : ''),
+    si: 'Borrar',
+  });
+  if (!ok) { abrirDeuda(id); return; }
+  datos.deudas = datos.deudas.filter((x) => x.id !== id);
+  guardar();
+  aviso('Deuda borrada');
+  pintar();
+}
+
+function abrirAbono() {
+  const d = deuda(editandoDeuda);
+  if (!d) return;
+  volverADeuda = true;
+  $('#dlg-deuda').close();
+  $('#abono-queda').textContent = C.deudaPagada(d) ? `«${d.nombre}» ya está pagada.` : `De «${d.nombre}» quedan ${cifraDeuda(d)} por pagar.`;
+  $('#abono-importe-etiqueta').textContent = `Cuánto abonas (en ${nombreCorto[d.moneda] || d.moneda})`;
+  $('#abono-importe').value = '';
+  $('#abono-fecha').value = C.hoyISO();
+  $('#abono-nota').value = '';
+  $('#abono-con-gasto').checked = false;
+  $('#abono-gasto').hidden = true;
+  $('#abono-cuenta').innerHTML = `<option value="">Elige una…</option>${datos.cuentas.map((c) => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('')}`;
+  const cats = C.ordenArbol(datos.categorias, 'gasto').filter((f) => !f.categoria.archivada);
+  $('#abono-categoria').innerHTML = `<option value="">Sin categoría (la pones luego)</option>${cats.map((f) => `<option value="${esc(f.categoria.id)}">${esc(C.textoRuta(datos.categorias, f.categoria.id))}</option>`).join('')}`;
+  $('#abono-error').hidden = true;
+  $('#dlg-abono').showModal();
+  setTimeout(() => $('#abono-importe').focus(), 50);
+}
+
+function guardarAbono() {
+  const d = deuda(editandoDeuda);
+  if (!d) return;
+  const importe = C.parseImporte($('#abono-importe').value);
+  const fecha = $('#abono-fecha').value;
+  const conGasto = $('#abono-con-gasto').checked;
+  const cuentaId = conGasto ? $('#abono-cuenta').value : null;
+  const err = $('#abono-error');
+  const fallo = C.comprobarAbono({ importe, fecha, cuenta: cuentaId, conGasto });
+  if (fallo) { err.textContent = fallo; err.hidden = false; return; }
+  const { abono, movimiento } = C.nuevoAbono(d, { importe, fecha, nota: $('#abono-nota').value },
+    { cuenta: cuentaId, categoria: conGasto ? $('#abono-categoria').value : null });
+  d.abonos.push(abono);
+  if (movimiento) datos.movimientos.push(movimiento);
+  if (!guardar()) {
+    d.abonos = d.abonos.filter((a) => a !== abono);
+    if (movimiento) datos.movimientos = datos.movimientos.filter((m) => m !== movimiento);
+    return;
+  }
+  volverADeuda = false; // se vuelve aquí mismo a la ficha, ya con el abono
+  $('#dlg-abono').close();
+  aviso(C.deudaPagada(d) ? `Listo: «${d.nombre}» ya está pagada` : `Abono apuntado: quedan ${cifraDeuda(d)}`);
+  pintar();
+  abrirDeuda(d.id);
+}
+
+async function borrarAbono(idAbono) {
+  const id = editandoDeuda;
+  const d = deuda(id);
+  const a = d && d.abonos.find((x) => x.id === idAbono);
+  if (!a) return;
+  const mov = a.movimiento ? datos.movimientos.find((m) => m.id === a.movimiento) : null;
+  $('#dlg-deuda').close();
+  const ok = await confirmar({
+    titulo: '¿Borrar este abono?',
+    texto: `El abono de ${C.formatoMoneda(a.importe, d.moneda)} del ${C.fechaDMA(a.fecha)} se borra y la deuda vuelve a subir en esa cantidad.`
+      + (mov ? ` También se borra el gasto que se apuntó en «${cuenta(mov.cuenta).nombre}».` : ''),
+    si: 'Borrar',
+  });
+  if (ok) {
+    d.abonos = d.abonos.filter((x) => x.id !== idAbono);
+    if (mov) datos.movimientos = datos.movimientos.filter((m) => m.id !== mov.id);
+    guardar();
+    aviso('Abono borrado');
+    pintar();
+  }
+  abrirDeuda(id);
 }
 
 // ---------- Ingreso esperado ----------
@@ -1957,14 +2206,16 @@ async function importar(archivo) {
   }
   if (!r.ok) { aviso(r.error); return; }
   const n = r.datos.movimientos.length;
-  // Una copia de antes del calendario y la lista de compra no los borra: se quedan los de este móvil.
+  // Una copia de antes del calendario, la lista de compra o las deudas no los borra: se quedan los de este móvil.
   const guarda = [];
   if (!r.trae.eventos && datos.eventos.length) { r.datos.eventos = datos.eventos; guarda.push('el calendario'); }
   if (!r.trae.compra && datos.compra.length) { r.datos.compra = datos.compra; guarda.push('la lista de compra'); }
   if (!r.trae.catalogo && datos.catalogo.length) { r.datos.catalogo = datos.catalogo; guarda.push('tus artículos de compra'); }
+  if (!r.trae.deudas && datos.deudas.length) { r.datos.deudas = datos.deudas; guarda.push('tus deudas'); }
   const extra = [];
   if (r.trae.eventos && r.datos.eventos.length) extra.push(plural(r.datos.eventos.length, 'fecha en el calendario', 'fechas en el calendario'));
   if (r.datos.transferencias.length) extra.push(plural(r.datos.transferencias.length, 'paso entre cuentas', 'pasos entre cuentas'));
+  if (r.trae.deudas && r.datos.deudas.length) extra.push(plural(r.datos.deudas.length, 'deuda', 'deudas'));
   if (r.trae.compra && r.datos.compra.length) extra.push(plural(r.datos.compra.length, 'cosa en la lista de compra', 'cosas en la lista de compra'));
   const ok = await confirmar({
     titulo: '¿Recuperar esta copia?',
@@ -2043,7 +2294,7 @@ async function traerWallet(archivo) {
 async function borrarTodo() {
   const ok = await confirmar({
     titulo: '¿Borrar todo?',
-    texto: 'Se borran todos los movimientos, pasos entre cuentas, categorías, cuentas y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
+    texto: 'Se borran todos los movimientos, pasos entre cuentas, deudas, categorías, cuentas y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
     si: 'Borrar todo',
   });
   if (!ok) return;
@@ -2135,6 +2386,13 @@ document.addEventListener('click', (e) => {
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
     case 'poner-saldo-hoy': guardarCuenta({ desdeHoy: true }); break;
+    case 'cuenta-a-deuda': mostrarCuentaADeuda(); break;
+    case 'cuenta-a-deuda-ok': pasarCuentaADeuda(); break;
+    case 'editar-deuda': abrirDeuda(el.dataset.id); break;
+    case 'nueva-deuda': abrirDeuda(); break;
+    case 'borrar-deuda': borrarDeuda(); break;
+    case 'nuevo-abono': abrirAbono(); break;
+    case 'borrar-abono': borrarAbono(el.dataset.id); break;
     case 'editar-esperado': abrirEsperado(el.dataset.id); break;
     case 'nuevo-esperado': abrirEsperado(); break;
     case 'borrar-esperado': borrarEsperado(); break;
@@ -2219,6 +2477,16 @@ for (const r of document.querySelectorAll('#form-trans input[name="trans-tipo"]'
 }
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });
 $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
+$('#cuenta-deuda-importe').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); pasarCuentaADeuda(); } });
+$('#form-deuda').addEventListener('submit', (e) => { e.preventDefault(); guardarDeuda(); });
+$('#form-abono').addEventListener('submit', (e) => { e.preventDefault(); guardarAbono(); });
+$('#abono-con-gasto').addEventListener('change', () => { $('#abono-gasto').hidden = !$('#abono-con-gasto').checked; $('#abono-error').hidden = true; });
+// Al cerrar la hoja de un abono (guardado o no), se vuelve a la ficha de su deuda.
+$('#dlg-abono').addEventListener('close', () => {
+  if (!volverADeuda) return;
+  volverADeuda = false;
+  setTimeout(() => abrirDeuda(editandoDeuda), 0);
+});
 $('#form-esperado').addEventListener('submit', (e) => { e.preventDefault(); guardarEsperado(); });
 $('#form-evento').addEventListener('submit', (e) => { e.preventDefault(); guardarEvento(); });
 $('#form-compra').addEventListener('submit', (e) => { e.preventDefault(); añadirCompra(); });

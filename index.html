@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="b1335c7983">
+  <meta name="version" content="15ed763bc2">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -45,7 +45,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.24 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.25 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -323,6 +323,99 @@
       <p class="error" id="cuenta-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cuenta" id="cuenta-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+      <!-- Pasar la cuenta a Deudas: crea la deuda y quita la cuenta -->
+      <button type="button" class="boton-linea" data-accion="cuenta-a-deuda" id="cuenta-a-deuda" hidden>Pasar a Deudas</button>
+      <div class="bloque-hoy" id="cuenta-deuda-bloque" hidden>
+        <p class="etiqueta-moneda">Pasar a Deudas</p>
+        <p class="explica">Si esta cuenta es en realidad algo que debes (un préstamo, el carro…), pásala a Deudas: la verás en el Resumen con lo que queda por pagar y ahí apuntas cada abono. La cuenta desaparece; sus movimientos no se borran.</p>
+        <label class="campo">
+          <span id="cuenta-deuda-etiqueta">Cuánto debes hoy</span>
+          <input id="cuenta-deuda-importe" inputmode="decimal" autocomplete="off" placeholder="0">
+        </label>
+        <p class="explica" id="cuenta-deuda-explica"></p>
+        <p class="error" id="cuenta-deuda-error" hidden></p>
+        <button type="button" class="boton principal" data-accion="cuenta-a-deuda-ok">Pasar a Deudas</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Una deuda: lo que queda, sus abonos y sus datos (no es una cuenta: no cuenta como gasto ni ingreso) -->
+  <dialog id="dlg-deuda" class="hoja" aria-labelledby="dlg-deuda-titulo">
+    <form method="dialog" id="form-deuda" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-deuda-titulo">Nueva deuda</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="deuda-ficha" hidden>
+        <p class="etiqueta-moneda" id="deuda-queda-etiqueta">Queda por pagar</p>
+        <div class="deuda-cifra" id="deuda-queda"></div>
+        <p class="explica" id="deuda-cuentas"></p>
+        <button type="button" class="boton principal ancho" data-accion="nuevo-abono">Apuntar un abono</button>
+        <h3 class="grupo-titulo">Abonos</h3>
+        <ul class="lista-abonos" id="deuda-abonos"></ul>
+        <h3 class="grupo-titulo">Cambiar la deuda</h3>
+      </div>
+      <label class="campo">
+        <span>Nombre</span>
+        <input id="deuda-nombre" maxlength="40" autocomplete="off" placeholder="Por ejemplo, préstamo del carro" required>
+      </label>
+      <p class="etiqueta-moneda">Moneda de la deuda</p>
+      <div class="segmentado monedas" id="deuda-moneda" role="radiogroup" aria-label="Moneda de la deuda"></div>
+      <label class="campo">
+        <span id="deuda-inicial-etiqueta">Cuánto debes hoy</span>
+        <input id="deuda-inicial" inputmode="decimal" autocomplete="off" placeholder="0">
+      </label>
+      <label class="campo">
+        <span>Nota</span>
+        <input id="deuda-nota" maxlength="200" autocomplete="off" placeholder="Opcional (a quién, hasta cuándo…)">
+      </label>
+      <p class="explica">Una deuda no es una cuenta: no cuenta como gasto ni cambia el saldo de tus cuentas. Si pagas un abono con dinero de una cuenta, al apuntarlo marca «Restarlo también de una cuenta».</p>
+      <p class="error" id="deuda-error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-deuda" id="deuda-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Apuntar un abono a una deuda -->
+  <dialog id="dlg-abono" class="hoja" aria-labelledby="dlg-abono-titulo">
+    <form method="dialog" id="form-abono" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-abono-titulo">Apuntar un abono</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <p class="explica" id="abono-queda"></p>
+      <label class="campo">
+        <span id="abono-importe-etiqueta">Cuánto abonas</span>
+        <input id="abono-importe" inputmode="decimal" autocomplete="off" placeholder="0">
+      </label>
+      <label class="campo">
+        <span>Fecha</span>
+        <input id="abono-fecha" type="date" required>
+      </label>
+      <label class="campo">
+        <span>Nota</span>
+        <input id="abono-nota" maxlength="200" autocomplete="off" placeholder="Opcional">
+      </label>
+      <label class="casilla">
+        <input type="checkbox" id="abono-con-gasto">
+        <span>Restarlo también de una cuenta (se apunta como un gasto)</span>
+      </label>
+      <div id="abono-gasto" hidden>
+        <label class="campo">
+          <span>De qué cuenta salió</span>
+          <select id="abono-cuenta"></select>
+        </label>
+        <label class="campo">
+          <span>Categoría del gasto</span>
+          <select id="abono-categoria"></select>
+        </label>
+      </div>
+      <p class="error" id="abono-error" hidden></p>
+      <div class="acciones">
         <button type="submit" class="boton principal">Guardar</button>
       </div>
     </form>

@@ -460,3 +460,18 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .segmentado[hidden], .segmentado label[hidden], #trans-campos[hidden], #trans-pocas[hidden] { display: none; }
 .mov.transferencia { border-left: 4px solid var(--acento); }
 .mov .importe.trans { color: var(--texto-suave); font-size: .9rem; }
+
+/* Deudas (v0.25) */
+.deuda-cifra { font-size: 1.8rem; font-weight: 750; letter-spacing: -.02em; margin: 0 0 4px; font-variant-numeric: tabular-nums; color: var(--gasto); }
+.deuda-cifra.pagada { color: var(--ingreso); }
+.boton.ancho { width: 100%; margin-bottom: 4px; }
+.cat-edit .importe { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cat-edit.pagada .nombre-deuda { text-decoration: line-through; color: var(--texto-suave); }
+.lista-abonos { list-style: none; margin: 0 0 8px; padding: 0; }
+.abono-fila { display: flex; align-items: center; gap: 10px; min-height: 48px; border-top: 1px solid var(--borde); }
+.abono-fila:first-child { border-top: 0; }
+.abono-fila .texto { flex: 1; min-width: 0; }
+.abono-fila .detalle { display: block; font-size: .82rem; color: var(--texto-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abono-fila .importe { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.abono-fila .quitar { flex: 0 0 40px; min-height: 44px; background: none; border: 0; color: var(--gasto); font-size: 1.1rem; }
+#deuda-ficha[hidden], #abono-gasto[hidden], #cuenta-deuda-bloque[hidden] { display: none; }
