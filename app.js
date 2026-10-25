@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'ed897ef2d0';
+const BUILD = 'eec4a4649c';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -1971,6 +1971,12 @@ async function traerWallet(archivo) {
   });
   if (!ok) return;
   datos.cuentas.push(...p.cuentasNuevas);
+  // Las cuentas que ya había sin moneda propia toman la de lo que se trae (la de su Wallet).
+  const sinMoneda = [];
+  for (const mc of p.monedasCuentas) {
+    const c = datos.cuentas.find((x) => x.id === mc.id);
+    if (c && !c.moneda) { c.moneda = mc.moneda; sinMoneda.push(c); }
+  }
   datos.categorias.push(...p.categoriasNuevas);
   datos.movimientos.push(...p.movimientos);
   if (!guardar()) {
@@ -1978,6 +1984,7 @@ async function traerWallet(archivo) {
     const nuevos = new Set(p.movimientos.map((m) => m.id));
     datos.movimientos = datos.movimientos.filter((m) => !nuevos.has(m.id));
     datos.cuentas = datos.cuentas.filter((c) => !p.cuentasNuevas.includes(c));
+    for (const c of sinMoneda) delete c.moneda;
     datos.categorias = datos.categorias.filter((c) => !p.categoriasNuevas.includes(c));
     return;
   }

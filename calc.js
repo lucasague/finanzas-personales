@@ -1051,6 +1051,7 @@ export function prepararWallet(filas, datos) {
       if (!catsPorNombre.has(k)) catsPorNombre.set(k, c.id);
     }
   }
+  const monedasExistentes = new Map(); // id de una cuenta que ya había y aún no tiene moneda -> Map(moneda -> n)
   const cuentasNuevas = new Map(); // nombre en minúsculas -> { cuenta, pagos: Map(tipo -> n) }
   const catsNuevas = new Map(); // nombre comparable -> { categoria, tipos: Map(tipo -> n) }
   const movimientos = [];
@@ -1074,13 +1075,18 @@ export function prepararWallet(filas, datos) {
     if (f.account) {
       const k = f.account.toLowerCase();
       cuenta = cuentasPorNombre.get(k) || null;
+      if (cuenta && !datos.cuentas.find((c) => c.id === cuenta).moneda) {
+        if (!monedasExistentes.has(cuenta)) monedasExistentes.set(cuenta, new Map());
+        sumarUno(monedasExistentes.get(cuenta), moneda);
+      }
       if (!cuenta) {
         let n = cuentasNuevas.get(k);
         if (!n) {
-          n = { cuenta: { id: nuevoId(), nombre: f.account.slice(0, 40), tipo: 'debito' }, pagos: new Map() };
+          n = { cuenta: { id: nuevoId(), nombre: f.account.slice(0, 40), tipo: 'debito' }, pagos: new Map(), monedas: new Map() };
           cuentasNuevas.set(k, n);
         }
         sumarUno(n.pagos, TIPO_CUENTA_WALLET[f.payment_type] || 'debito');
+        sumarUno(n.monedas, moneda);
         cuenta = n.cuenta.id;
       }
     }
@@ -1120,7 +1126,10 @@ export function prepararWallet(filas, datos) {
       claveOrigen: f.clave,
     });
   }
-  for (const n of cuentasNuevas.values()) n.cuenta.tipo = mayoritario(n.pagos);
+  for (const n of cuentasNuevas.values()) {
+    n.cuenta.tipo = mayoritario(n.pagos);
+    n.cuenta.moneda = mayoritario(n.monedas) || n.cuenta.moneda;
+  }
   for (const n of catsNuevas.values()) n.categoria.tipo = mayoritario(n.tipos);
   let desde = null;
   let hasta = null;
@@ -1131,6 +1140,7 @@ export function prepararWallet(filas, datos) {
   return {
     movimientos,
     cuentasNuevas: [...cuentasNuevas.values()].map((n) => n.cuenta),
+    monedasCuentas: [...monedasExistentes].map(([id, m]) => ({ id, moneda: mayoritario(m) })),
     categoriasNuevas: [...catsNuevas.values()].map((n) => n.categoria),
     transferencias,
     duplicados,
