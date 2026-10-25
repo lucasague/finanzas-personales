@@ -185,6 +185,10 @@ button.plegar.abierta { transform: rotate(90deg); }
 .grupo-titulo:first-of-type { margin-top: 0; }
 .botones-col { display: grid; gap: 10px; }
 .explica { font-size: .88rem; color: var(--texto-suave); margin: 0 0 12px; }
+.bloque-hoy { border: 1px solid var(--borde); border-radius: 12px; padding: 12px; margin: 0 0 14px; }
+.bloque-hoy[hidden], .aviso-hoy[hidden] { display: none; }
+.bloque-hoy .boton { width: 100%; }
+.aviso-hoy { color: var(--gasto); }
 .version { font-size: .75rem; color: var(--texto-suave); text-align: center; margin: 4px 0 0; }
 
 /* Botones */

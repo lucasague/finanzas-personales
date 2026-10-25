@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="eec4a4649c">
+  <meta name="version" content="b1335c7983">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -45,7 +45,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.23 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.24 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -304,11 +304,22 @@
       </div>
       <p class="etiqueta-moneda">Moneda de la cuenta</p>
       <div class="segmentado monedas" id="cuenta-moneda" role="radiogroup" aria-label="Moneda de la cuenta"></div>
+      <div class="bloque-hoy" id="cuenta-hoy-bloque" hidden>
+        <p class="etiqueta-moneda">Poner el saldo de hoy</p>
+        <p class="explica" id="cuenta-hoy-ahora"></p>
+        <label class="campo">
+          <span>Lo que tienes hoy en esta cuenta</span>
+          <input id="cuenta-hoy" inputmode="decimal" autocomplete="off" placeholder="Por ejemplo 1500 o -2000">
+        </label>
+        <p class="explica">Escribe lo que te marca hoy el banco, o lo que tienes en la cartera. Si es una deuda, con un menos delante: -2000. La app hace la cuenta para que cuadre con todo lo que ya apuntaste.</p>
+        <p class="explica aviso-hoy" id="cuenta-hoy-aviso" hidden></p>
+        <button type="button" class="boton principal" data-accion="poner-saldo-hoy">Poner el saldo de hoy</button>
+      </div>
       <label class="campo">
-        <span>Cuánto tiene ahora (saldo de partida)</span>
+        <span id="cuenta-saldo-etiqueta">Cuánto tiene ahora (saldo de partida)</span>
         <input id="cuenta-saldo" inputmode="decimal" autocomplete="off" placeholder="0">
       </label>
-      <p class="explica">Pon lo que hay hoy en la cuenta. Si es una deuda (tarjeta de crédito), con un menos delante: -2000. Desde ahí la app suma y resta lo que apuntes.</p>
+      <p class="explica" id="cuenta-saldo-explica">Pon lo que hay hoy en la cuenta. Si es una deuda (tarjeta de crédito), con un menos delante: -2000. Desde ahí la app suma y resta lo que apuntes.</p>
       <p class="error" id="cuenta-error" hidden></p>
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-cuenta" id="cuenta-borrar" hidden>Borrar</button>

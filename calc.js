@@ -330,6 +330,21 @@ export function saldosPorCuenta(movimientos, cuentas, base = 'MXN', transferenci
   return [...porId.values(), huerfana].filter((f) => f.cuenta.id !== null || f.n > 0);
 }
 
+/**
+ * "Poner el saldo de hoy": qué saldo de partida necesita la cuenta `id` para que su saldo de hoy (el de
+ * saldosPorCuenta) sea exactamente `saldoHoy`, en céntimos de la moneda de la cuenta. `moneda` permite calcularlo
+ * con la que se acaba de elegir en el editor (por defecto la de la cuenta). Devuelve { saldoInicial, sinConvertir }:
+ * `sinConvertir` son los movimientos o transferencias en otra moneda sin tipo de cambio, que no cuentan en el saldo
+ * de hoy (si luego se les pone, el saldo cambiará). null si la cuenta no existe.
+ */
+export function saldoDePartidaPara(id, saldoHoy, movimientos, cuentas, base = 'MXN', transferencias = [], moneda = null) {
+  const c = cuentas.find((x) => x.id === id);
+  if (!c) return null;
+  const sinPartida = cuentas.map((x) => (x.id === id ? { ...x, saldoInicial: 0, moneda: moneda || x.moneda } : x));
+  const fila = saldosPorCuenta(movimientos, sinPartida, base, transferencias).find((f) => f.cuenta.id === id);
+  return { saldoInicial: saldoHoy - fila.saldo, sinConvertir: fila.sinConvertir };
+}
+
 /** Como parseImporteOCero, pero acepta un menos delante: el saldo de una tarjeta puede ser una deuda. */
 export function parseSaldo(texto) {
   const t = String(texto ?? '').trim();

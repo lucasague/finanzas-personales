@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'eec4a4649c';
+const BUILD = 'b1335c7983';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -182,7 +182,7 @@ function pintarResumen() {
     for (const f of saldos) totales.set(f.moneda, (totales.get(f.moneda) || 0) + f.saldo);
     const cifra = (c, mon) => `${c < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(c), mon)}`;
     html += `<div class="tarjeta"><h2>Saldo de cada cuenta</h2>
-      <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado y lo pasado entre cuentas. Para ajustarlo, edita la cuenta en Ajustes.</p>`;
+      <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado y lo pasado entre cuentas. Si no cuadra con lo que tienes de verdad, ve a Ajustes, toca la cuenta y usa «Poner el saldo de hoy».</p>`;
     for (const f of saldos) {
       html += `
         <div class="cat-fila">
@@ -1409,6 +1409,18 @@ function abrirCuenta(id = null) {
   document.querySelector(`#form-cuenta input[name="cuenta-tipo"][value="${c ? c.tipo : 'efectivo'}"]`).checked = true;
   $('#cuenta-saldo').value = c && c.saldoInicial ? (c.saldoInicial < 0 ? '-' : '') + C.importeEditable(Math.abs(c.saldoInicial)) : '';
   pintarMonedaCuenta(c?.moneda || datos.moneda);
+  // "Poner el saldo de hoy": solo en una cuenta que ya existe (en una nueva, lo de partida ya es lo de hoy).
+  $('#cuenta-hoy-bloque').hidden = !c;
+  $('#cuenta-hoy').value = '';
+  $('#cuenta-saldo-etiqueta').textContent = c ? 'Saldo de partida' : 'Cuánto tiene ahora (saldo de partida)';
+  $('#cuenta-saldo-explica').textContent = c
+    ? 'Lo que había antes de todo lo apuntado. Si no lo sabes, no pasa nada: usa “Poner el saldo de hoy” y la app lo calcula.'
+    : 'Pon lo que hay hoy en la cuenta. Si es una deuda (tarjeta de crédito), con un menos delante: -2000. Desde ahí la app suma y resta lo que apuntes.';
+  if (c) {
+    const f = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda, datos.transferencias).find((x) => x.cuenta.id === c.id);
+    $('#cuenta-hoy-ahora').textContent = `Ahora la app dice que tiene ${cifraSaldo(f.saldo, f.moneda)}.`;
+    pintarAvisoHoy(f.sinConvertir);
+  }
   $('#cuenta-borrar').hidden = !c;
   $('#cuenta-error').hidden = true;
   $('#dlg-cuenta').showModal();
@@ -1420,15 +1432,43 @@ function pintarMonedaCuenta(moneda) {
     .map((cod) => `<label><input type="radio" name="cuenta-moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
 }
 
-function guardarCuenta() {
+const cifraSaldo = (c, mon) => `${c < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(c), mon)}`;
+
+function textoSinContar(n) {
+  return `${plural(n, 'movimiento', 'movimientos')} en otra moneda sin tipo de cambio no se pueden contar. Cuando les pongas el tipo de cambio, el saldo de esta cuenta cambiará.`;
+}
+
+function pintarAvisoHoy(sinConvertir) {
+  const a = $('#cuenta-hoy-aviso');
+  a.textContent = sinConvertir ? `Ojo: ${textoSinContar(sinConvertir)}` : '';
+  a.hidden = !sinConvertir;
+}
+
+// Con `desdeHoy` (botón "Poner el saldo de hoy") exige lo de hoy; con Guardar, si lo escribió, también lo usa.
+async function guardarCuenta({ desdeHoy = false } = {}) {
   const nombre = $('#cuenta-nombre').value.trim().slice(0, 40);
   const err = $('#cuenta-error');
-  if (!nombre) { err.textContent = 'Ponle un nombre.'; err.hidden = false; return; }
+  const fallo = (texto) => { err.textContent = texto; err.hidden = false; };
+  if (!nombre) return fallo('Ponle un nombre.');
   const tipo = document.querySelector('#form-cuenta input[name="cuenta-tipo"]:checked').value;
   const moneda = document.querySelector('#cuenta-moneda input:checked')?.value || datos.moneda;
-  const textoSaldo = $('#cuenta-saldo').value.trim();
-  const saldoInicial = textoSaldo ? C.parseSaldo(textoSaldo) : 0;
-  if (saldoInicial == null) { err.textContent = 'El saldo no se entiende. Escribe solo el número, por ejemplo 1500 o -2000.'; err.hidden = false; return; }
+  const textoHoy = editandoCuenta ? $('#cuenta-hoy').value.trim() : '';
+  if (desdeHoy && !textoHoy) { $('#cuenta-hoy').focus(); return fallo('Escribe primero lo que tienes hoy en esta cuenta.'); }
+  let saldoInicial;
+  let hoy = null;
+  let sinContar = 0;
+  if (textoHoy) {
+    hoy = C.parseSaldo(textoHoy);
+    if (hoy == null) return fallo('Lo que tienes hoy no se entiende. Escribe solo el número, por ejemplo 1500 o -2000.');
+    const r = C.saldoDePartidaPara(editandoCuenta, hoy, datos.movimientos, datos.cuentas, datos.moneda, datos.transferencias, moneda);
+    if (!r) return fallo('No encuentro esta cuenta. Cierra y vuelve a abrirla.');
+    saldoInicial = r.saldoInicial;
+    sinContar = r.sinConvertir;
+  } else {
+    const textoSaldo = $('#cuenta-saldo').value.trim();
+    saldoInicial = textoSaldo ? C.parseSaldo(textoSaldo) : 0;
+    if (saldoInicial == null) return fallo('El saldo no se entiende. Escribe solo el número, por ejemplo 1500 o -2000.');
+  }
   if (editandoCuenta) {
     const c = datos.cuentas.find((x) => x.id === editandoCuenta);
     if (c) Object.assign(c, { nombre, tipo, moneda, saldoInicial });
@@ -1437,8 +1477,14 @@ function guardarCuenta() {
   }
   if (!guardar()) return;
   $('#dlg-cuenta').close();
-  aviso('Cuenta guardada');
   pintar();
+  if (hoy == null) return aviso('Cuenta guardada');
+  if (!sinContar) return aviso(`Listo: hoy tiene ${cifraSaldo(hoy, moneda)}`);
+  await confirmar({
+    titulo: 'Saldo de hoy puesto',
+    texto: `${nombre} queda hoy en ${cifraSaldo(hoy, moneda)}. Ojo: ${textoSinContar(sinContar)}`,
+    si: 'Entendido', peligro: false, soloAceptar: true,
+  });
 }
 
 async function borrarCuenta() {
@@ -2088,6 +2134,7 @@ document.addEventListener('click', (e) => {
     case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
+    case 'poner-saldo-hoy': guardarCuenta({ desdeHoy: true }); break;
     case 'editar-esperado': abrirEsperado(el.dataset.id); break;
     case 'nuevo-esperado': abrirEsperado(); break;
     case 'borrar-esperado': borrarEsperado(); break;
