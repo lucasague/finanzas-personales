@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '5a2f8661e6';
+const BUILD = '3eb9ed4516';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -155,10 +155,23 @@ function pintarResumen() {
   const filas = C.gastoPorCategoria(movs, mes, datos.categorias);
   const hayMovs = datos.movimientos.some((m) => C.claveMes(m.fecha) === mes);
 
+  // Dinero de hoy: la suma de los saldos de las cuentas, por moneda (sin convertir entre ellas). Sin cuentas, queda lo del mes.
+  const saldosHoy = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda, datos.transferencias);
+  let dineroHoy = null;
+  if (saldosHoy.some((f) => f.cuenta.id !== null)) {
+    const tot = new Map();
+    for (const f of saldosHoy) tot.set(f.moneda, (tot.get(f.moneda) || 0) + f.saldo);
+    dineroHoy = {
+      texto: [...tot].map(([mon, t]) => `${t < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(t), mon)}`).join(' + '),
+      neg: tot.size === 1 && [...tot.values()][0] < 0,
+    };
+  }
+
   let html = `
     <div class="tarjeta saldo">
-      <div class="etiqueta">Te queda este mes</div>
-      <div class="cifra ${r.saldo < 0 ? 'negativo' : ''}">${esc(dinero(r.saldo))}</div>
+      <div class="etiqueta">${dineroHoy ? 'Tienes hoy' : 'Te queda este mes'}</div>
+      <div class="cifra ${(dineroHoy ? dineroHoy.neg : r.saldo < 0) ? 'negativo' : ''}">${esc(dineroHoy ? dineroHoy.texto : dinero(r.saldo))}</div>
+      ${dineroHoy ? `<p class="subtitulo">Lo que hay ahora en todas tus cuentas. Este mes: te queda ${esc(dinero(r.saldo))}</p>` : ''}
       <div class="totales">
         <div><span class="t-etq">Ingresos</span><span class="t-val ingreso">${esc(dinero(r.ingresos))}</span></div>
         <div><span class="t-etq">Gastos</span><span class="t-val gasto">${esc(dinero(r.gastos))}</span></div>
