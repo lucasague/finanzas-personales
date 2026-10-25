@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '15ed763bc2';
+const BUILD = '9e8b82ad29';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -186,6 +186,7 @@ function pintarResumen() {
     html += `<div class="tarjeta"><h2>Saldo de cada cuenta</h2>
       <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado y lo pasado entre cuentas. Si no cuadra con lo que tienes de verdad, ve a Ajustes, toca la cuenta y usa «Poner el saldo de hoy».</p>`;
     for (const f of saldos) {
+      if (f.cuenta.id === null) { html += filaSinCuenta(cifra(f.saldo, f.moneda), f.saldo < 0); continue; }
       html += `
         <div class="cat-fila">
           <div class="cat-linea">
@@ -204,6 +205,7 @@ function pintarResumen() {
     html += `<div class="tarjeta"><h2>Por cuenta</h2>
       <p class="explica">Lo que se movió este mes en cada una (ingresos − gastos).</p>`;
     for (const f of cuentas) {
+      if (f.cuenta.id === null) { html += filaSinCuenta(`${f.neto < 0 ? '−' : '+'}${dinero(Math.abs(f.neto))}`, f.neto < 0); continue; }
       html += `
         <div class="cat-fila">
           <div class="cat-linea">
@@ -215,6 +217,16 @@ function pintarResumen() {
     html += `</div>`;
   }
   $('#vista-resumen').innerHTML = html;
+}
+
+/** La fila «Sin cuenta» del Resumen (v0.26): se toca para pasar todo eso a una cuenta, y entonces desaparece. */
+function filaSinCuenta(importe, negativo) {
+  return `
+    <button type="button" class="cat-edit" data-accion="asignar-sin-cuenta">
+      <span class="texto"><span>❔ Sin cuenta</span><br><span class="detalle">Toca para pasarlos a una cuenta</span></span>
+      <span class="importe ${negativo ? 'gasto' : 'ingreso'}">${esc(importe)}</span>
+      <span class="flecha" aria-hidden="true">›</span>
+    </button>`;
 }
 
 /** Esperado frente a real del mes, en el Resumen. Nada si no hay ingreso esperado ese mes. */
@@ -1510,10 +1522,107 @@ function quitarCuenta(id) {
   if (ultimaCuenta === id) ultimaCuenta = null;
 }
 
+/** "3 movimientos y 1 paso entre cuentas", en palabras de la persona. */
+function textoCuantos(movs, pasos) {
+  const partes = [];
+  if (movs) partes.push(plural(movs, 'movimiento', 'movimientos'));
+  if (pasos) partes.push(plural(pasos, 'paso entre cuentas', 'pasos entre cuentas'));
+  return partes.join(' y ');
+}
+
+// Elegir una cuenta en #dlg-a-cuenta (v0.26). Devuelve el id elegido, o null si se cierra sin elegir.
+let alElegirCuenta = null;
+function elegirCuenta({ titulo, texto, si = 'Seguir', excepto = null }) {
+  const dlg = $('#dlg-a-cuenta');
+  const opciones = datos.cuentas.filter((c) => c.id !== excepto);
+  $('#a-cuenta-titulo').textContent = titulo;
+  $('#a-cuenta-texto').textContent = texto;
+  $('#a-cuenta-destino').innerHTML = `<option value="">Elige una…</option>`
+    + opciones.map((c) => `<option value="${esc(c.id)}">${esc(emojiCuenta(c))} ${esc(c.nombre)}</option>`).join('');
+  if (opciones.length === 1) $('#a-cuenta-destino').value = opciones[0].id;
+  $('#a-cuenta-ok').textContent = si;
+  $('#a-cuenta-error').hidden = true;
+  return new Promise((resolver) => {
+    let elegida = null;
+    alElegirCuenta = () => {
+      const v = $('#a-cuenta-destino').value;
+      if (!v) { $('#a-cuenta-error').textContent = 'Elige una cuenta.'; $('#a-cuenta-error').hidden = false; return; }
+      elegida = v;
+      dlg.close();
+    };
+    dlg.addEventListener('close', () => { alElegirCuenta = null; resolver(elegida); }, { once: true });
+    dlg.showModal();
+  });
+}
+
+/** La fila «Sin cuenta» del Resumen: pasa todo lo que está sin cuenta a la que se elija. */
+async function asignarSinCuenta() {
+  const s = C.contarSinCuenta(datos.movimientos, datos.transferencias, datos.cuentas);
+  if (!s.movimientos && !s.pasos) { pintar(); return; }
+  if (!datos.cuentas.length) {
+    await confirmar({
+      titulo: 'Primero, una cuenta',
+      texto: 'Para pasar estos movimientos a una cuenta, primero crea una en Ajustes, en Cuentas.',
+      si: 'Entendido', peligro: false, soloAceptar: true,
+    });
+    return;
+  }
+  const destino = await elegirCuenta({
+    titulo: 'Pasar a una cuenta',
+    texto: `Hay ${textoCuantos(s.movimientos, s.pasos)} sin cuenta. Elige a qué cuenta van y dejarán de salir como «Sin cuenta».`,
+  });
+  if (!destino) return;
+  const r = C.pasarACuenta(datos.movimientos, datos.transferencias, datos.cuentas, destino);
+  if (!r) return;
+  const nombre = cuenta(destino).nombre;
+  if (!r.n && !r.pasos) { aviso(`No hay nada que pasar a «${nombre}»`); return; }
+  const ok = await confirmar({
+    titulo: `¿Pasar ${textoCuantos(r.n, r.pasos)} a «${nombre}»?`,
+    texto: `Todo lo que ahora sale como «Sin cuenta» pasa a «${nombre}», y su saldo cambiará con lo que suman. Si luego alguno no era de ahí, lo cambias tocándolo en Movimientos.`,
+    si: 'Sí, pasarlos',
+    peligro: false,
+  });
+  if (!ok) return;
+  const antes = { movimientos: datos.movimientos, transferencias: datos.transferencias };
+  datos.movimientos = r.movimientos;
+  datos.transferencias = r.transferencias;
+  if (!guardar()) { Object.assign(datos, antes); return; }
+  pintar();
+  aviso(`Listo: ${textoCuantos(r.n, r.pasos)} en «${nombre}»`);
+}
+
 async function borrarCuenta() {
   const id = editandoCuenta;
   const c = datos.cuentas.find((x) => x.id === id);
   $('#dlg-cuenta').close();
+  // Si tiene movimientos y hay otra cuenta, se pasan a esa antes de borrar: así no queda nada «Sin cuenta» (v0.26).
+  const usos = datos.movimientos.filter((m) => m.cuenta === id).length;
+  const pasos = datos.transferencias.filter((t) => t.desde === id || t.hacia === id).length;
+  if (c && (usos || pasos) && datos.cuentas.some((x) => x.id !== id)) {
+    const destino = await elegirCuenta({
+      titulo: `¿Borrar «${c.nombre}»?`,
+      texto: `Tiene ${textoCuantos(usos, pasos)}. No se borran: elige a qué cuenta pasan, y luego se borra «${c.nombre}».`,
+      excepto: id,
+    });
+    if (!destino) { abrirCuenta(id); return; }
+    const r = C.pasarACuenta(datos.movimientos, datos.transferencias, datos.cuentas, destino, id);
+    if (!r) { abrirCuenta(id); return; }
+    const nombre = cuenta(destino).nombre;
+    const seguro = await confirmar({
+      titulo: `¿Borrar «${c.nombre}»?`,
+      texto: `Sus ${textoCuantos(r.n, r.pasos)} pasan a «${nombre}», y el saldo de «${nombre}» cambiará con lo que suman.`
+        + (r.mismos ? ` Lo que pasaste entre «${c.nombre}» y «${nombre}» sigue contando en «${nombre}».` : ''),
+      si: 'Borrar',
+    });
+    if (!seguro) { abrirCuenta(id); return; }
+    datos.movimientos = r.movimientos;
+    datos.transferencias = r.transferencias;
+    quitarCuenta(id);
+    guardar();
+    aviso(`Cuenta borrada: lo suyo está en «${nombre}»`);
+    pintar();
+    return;
+  }
   const ok = await confirmar({
     titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
     texto: textoQuitarCuenta(id),
@@ -2385,6 +2494,8 @@ document.addEventListener('click', (e) => {
     case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
+    case 'asignar-sin-cuenta': asignarSinCuenta(); break;
+    case 'a-cuenta-ok': if (alElegirCuenta) alElegirCuenta(); break;
     case 'poner-saldo-hoy': guardarCuenta({ desdeHoy: true }); break;
     case 'cuenta-a-deuda': mostrarCuentaADeuda(); break;
     case 'cuenta-a-deuda-ok': pasarCuentaADeuda(); break;

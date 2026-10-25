@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="15ed763bc2">
+  <meta name="version" content="9e8b82ad29">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -45,7 +45,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.25 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.26 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -339,6 +339,23 @@
         <button type="button" class="boton principal" data-accion="cuenta-a-deuda-ok">Pasar a Deudas</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Elegir a qué cuenta pasan unos movimientos: los «Sin cuenta» o los de una cuenta que se borra (v0.26) -->
+  <dialog id="dlg-a-cuenta" class="hoja" aria-labelledby="a-cuenta-titulo">
+    <div class="hoja-cabecera">
+      <h2 id="a-cuenta-titulo">Pasar a una cuenta</h2>
+      <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+    </div>
+    <p class="explica" id="a-cuenta-texto"></p>
+    <label class="campo">
+      <span>A qué cuenta van</span>
+      <select id="a-cuenta-destino"></select>
+    </label>
+    <p class="error" id="a-cuenta-error" hidden></p>
+    <div class="acciones">
+      <button type="button" class="boton principal" data-accion="a-cuenta-ok" id="a-cuenta-ok">Seguir</button>
+    </div>
   </dialog>
 
   <!-- Una deuda: lo que queda, sus abonos y sus datos (no es una cuenta: no cuenta como gasto ni ingreso) -->

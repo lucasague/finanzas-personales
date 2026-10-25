@@ -346,6 +346,50 @@ export function saldoDePartidaPara(id, saldoHoy, movimientos, cuentas, base = 'M
   return { saldoInicial: saldoHoy - fila.saldo, sinConvertir: fila.sinConvertir };
 }
 
+/**
+ * Lo que está "Sin cuenta" (v0.26): movimientos sin cuenta o con una cuenta que ya no existe, y pasos entre cuentas
+ * con algún lado así. Devuelve { movimientos, pasos } (cuántos).
+ */
+export function contarSinCuenta(movimientos, transferencias, cuentas) {
+  const ids = new Set(cuentas.map((c) => c.id));
+  return {
+    movimientos: movimientos.filter((m) => !ids.has(m.cuenta)).length,
+    pasos: (transferencias || []).filter((t) => !ids.has(t.desde) || !ids.has(t.hacia)).length,
+  };
+}
+
+/**
+ * Pasa a la cuenta `destino` lo de `origen` (el id de una cuenta) o, si `origen` es null, todo lo que está
+ * "Sin cuenta". No toca lo que recibe: devuelve { movimientos, transferencias } nuevas y los recuentos `n`
+ * (movimientos pasados), `pasos` (pasos entre cuentas cambiados) y `mismos` (pasos que se quedan como estaban
+ * porque su otro lado ya es `destino`: un paso de una cuenta a ella misma no tiene sentido). null si `destino`
+ * no es una cuenta que exista o es el propio `origen`.
+ */
+export function pasarACuenta(movimientos, transferencias, cuentas, destino, origen = null) {
+  const ids = new Set(cuentas.map((c) => c.id));
+  if (!ids.has(destino) || destino === origen) return null;
+  const toca = origen == null ? (id) => !ids.has(id) : (id) => id === origen;
+  let n = 0;
+  let pasos = 0;
+  let mismos = 0;
+  const movs = movimientos.map((m) => {
+    if (!toca(m.cuenta)) return m;
+    n++;
+    return { ...m, cuenta: destino };
+  });
+  const trans = (transferencias || []).map((t) => {
+    const d = toca(t.desde);
+    const h = toca(t.hacia);
+    if (!d && !h) return t;
+    const desde = d ? destino : t.desde;
+    const hacia = h ? destino : t.hacia;
+    if (desde === hacia) { mismos++; return t; }
+    pasos++;
+    return { ...t, desde, hacia };
+  });
+  return { movimientos: movs, transferencias: trans, n, pasos, mismos };
+}
+
 /** Como parseImporteOCero, pero acepta un menos delante: el saldo de una tarjeta puede ser una deuda. */
 export function parseSaldo(texto) {
   const t = String(texto ?? '').trim();
@@ -1211,9 +1255,12 @@ export function prepararWallet(filas, datos) {
     const tipo = /^(ingresos?|income)$/i.test(f.type) ? 'ingreso'
       : /^(gastos?|expenses?)$/i.test(f.type) ? 'gasto' : (cantidad > 0 ? 'ingreso' : 'gasto');
 
+    // Una fila sin cuenta va a una cuenta "Wallet" (la que ya haya con ese nombre o una nueva): así nada queda
+    // "Sin cuenta" (v0.26).
+    const nombreCuenta = f.account || 'Wallet';
     let cuenta = null;
-    if (f.account) {
-      const k = f.account.toLowerCase();
+    {
+      const k = nombreCuenta.toLowerCase();
       cuenta = cuentasPorNombre.get(k) || null;
       if (cuenta && !datos.cuentas.find((c) => c.id === cuenta).moneda) {
         if (!monedasExistentes.has(cuenta)) monedasExistentes.set(cuenta, new Map());
@@ -1222,7 +1269,7 @@ export function prepararWallet(filas, datos) {
       if (!cuenta) {
         let n = cuentasNuevas.get(k);
         if (!n) {
-          n = { cuenta: { id: nuevoId(), nombre: f.account.slice(0, 40), tipo: 'debito' }, pagos: new Map(), monedas: new Map() };
+          n = { cuenta: { id: nuevoId(), nombre: nombreCuenta.slice(0, 40), tipo: 'debito' }, pagos: new Map(), monedas: new Map() };
           cuentasNuevas.set(k, n);
         }
         sumarUno(n.pagos, TIPO_CUENTA_WALLET[f.payment_type] || 'debito');
