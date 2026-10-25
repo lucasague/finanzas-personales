@@ -451,3 +451,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .guardado-form input {
   min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--borde); background: var(--superficie);
 }
+
+/* Transferencias entre cuentas (v0.22): en la lista se distinguen por el borde y el importe neutro. */
+.segmentado[hidden], .segmentado label[hidden], #trans-campos[hidden], #trans-pocas[hidden] { display: none; }
+.mov.transferencia { border-left: 4px solid var(--acento); }
+.mov .importe.trans { color: var(--texto-suave); font-size: .9rem; }

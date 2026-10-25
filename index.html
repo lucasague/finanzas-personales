@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="8432f1d1ff">
+  <meta name="version" content="ed897ef2d0">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -45,7 +45,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.19 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.22 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -66,9 +66,10 @@
         <h2 id="dlg-mov-titulo">Nuevo movimiento</h2>
         <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
       </div>
-      <div class="segmentado" role="radiogroup" aria-label="Tipo">
+      <div class="segmentado tres" role="radiogroup" aria-label="Tipo">
         <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
         <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
+        <label id="mov-a-transferencia"><input type="radio" name="tipo" value="transferencia"><span>Entre cuentas</span></label>
       </div>
       <p class="etiqueta-moneda">Moneda en que se pagó</p>
       <div class="segmentado monedas" id="mov-moneda" role="radiogroup" aria-label="Moneda"></div>
@@ -110,6 +111,51 @@
       <div class="acciones">
         <button type="button" class="boton peligro-suave" data-accion="borrar-mov" id="mov-borrar" hidden>Borrar</button>
         <button type="submit" class="boton principal">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Transferencia entre cuentas propias (no es gasto ni ingreso: solo mueve el saldo) -->
+  <dialog id="dlg-trans" class="hoja" aria-labelledby="dlg-trans-titulo">
+    <form method="dialog" id="form-trans" novalidate>
+      <div class="hoja-cabecera">
+        <h2 id="dlg-trans-titulo">Pasar dinero entre cuentas</h2>
+        <button type="button" class="icono" data-accion="cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="segmentado tres" id="trans-tipos" role="radiogroup" aria-label="Tipo">
+        <label><input type="radio" name="trans-tipo" value="gasto"><span>Gasto</span></label>
+        <label><input type="radio" name="trans-tipo" value="ingreso"><span>Ingreso</span></label>
+        <label><input type="radio" name="trans-tipo" value="transferencia" checked><span>Entre cuentas</span></label>
+      </div>
+      <p class="explica">No cuenta como gasto ni como ingreso: solo pasa el dinero de una cuenta tuya a otra.</p>
+      <p class="explica" id="trans-pocas" hidden>Para pasar dinero entre cuentas necesitas al menos dos. Créalas en Ajustes → Cuentas.</p>
+      <div id="trans-campos">
+        <p class="etiqueta-moneda">Sale de</p>
+        <div class="chips" id="trans-desde" role="radiogroup" aria-label="Cuenta de la que sale"></div>
+        <p class="etiqueta-moneda">Llega a</p>
+        <div class="chips" id="trans-hacia" role="radiogroup" aria-label="Cuenta a la que llega"></div>
+        <label class="campo">
+          <span id="trans-sale-etiqueta">Cuánto sale</span>
+          <input id="trans-sale" inputmode="decimal" autocomplete="off" placeholder="0">
+        </label>
+        <label class="campo">
+          <span id="trans-llega-etiqueta">Cuánto llega</span>
+          <input id="trans-llega" inputmode="decimal" autocomplete="off" placeholder="0">
+        </label>
+        <p class="nota-tasa" id="trans-tasa"></p>
+        <p class="error" id="trans-error" hidden></p>
+        <label class="campo">
+          <span>Nota</span>
+          <input id="trans-nota" maxlength="200" autocomplete="off" placeholder="Opcional">
+        </label>
+        <label class="campo">
+          <span>Fecha</span>
+          <input id="trans-fecha" type="date" required>
+        </label>
+      </div>
+      <div class="acciones">
+        <button type="button" class="boton peligro-suave" data-accion="borrar-trans" id="trans-borrar" hidden>Borrar</button>
+        <button type="submit" class="boton principal" id="trans-guardar">Guardar</button>
       </div>
     </form>
   </dialog>

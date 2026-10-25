@@ -35,7 +35,7 @@ export const CUENTAS_POR_DEFECTO = [
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-export const VERSION_DATOS = 7;
+export const VERSION_DATOS = 8;
 export const INICIO_AÑO_POR_DEFECTO = 9; // septiembre: el año va de septiembre a agosto
 
 export function datosIniciales() {
@@ -46,6 +46,7 @@ export function datosIniciales() {
     categorias: CATEGORIAS_POR_DEFECTO.map((c) => ({ ...c, presupuesto: null, padre: null })),
     cuentas: CUENTAS_POR_DEFECTO.map((c) => ({ ...c })),
     movimientos: [],
+    transferencias: [], // dinero que pasa de una cuenta propia a otra: no es gasto ni ingreso (ver "Transferencias")
     sinColocar: [], // categorías con movimientos que no estaban en la lista al organizarlas: le faltan sitio
     esperados: [], // ingreso esperado al mes (ver "Ingreso esperado")
     esperadosMes: [], // lo esperado de un mes concreto, cuando no es lo habitual
@@ -303,7 +304,7 @@ export function netoPorCuenta(movs, clave, cuentas) {
  * menos todos sus gastos, sin mirar el mes. Cada cuenta va en su moneda (`moneda`, por defecto la principal); lo apuntado en otra se convierte. Los de cuentas
  * borradas o sin cuenta van a "Sin cuenta", que solo sale si los hay.
  */
-export function saldosPorCuenta(movimientos, cuentas, base = 'MXN') {
+export function saldosPorCuenta(movimientos, cuentas, base = 'MXN', transferencias = []) {
   const tasas = tasasImplicitas(movimientos);
   const porId = new Map(cuentas.map((c) => [c.id, { cuenta: c, moneda: c.moneda || base, saldo: c.saldoInicial || 0, n: 0, sinConvertir: 0 }]));
   const huerfana = { cuenta: { id: null, nombre: 'Sin cuenta', tipo: null }, moneda: base, saldo: 0, n: 0, sinConvertir: 0 };
@@ -313,6 +314,18 @@ export function saldosPorCuenta(movimientos, cuentas, base = 'MXN') {
     if (v == null) { fila.sinConvertir++; continue; }
     fila.saldo += m.tipo === 'ingreso' ? v : -v;
     fila.n++;
+  }
+  // Una transferencia resta lo que sale de la cuenta de salida y suma lo que llega a la de entrada, cada parte en
+  // su moneda. El lado de una cuenta ya borrada no cuenta en ninguna (tampoco en "Sin cuenta").
+  for (const t of transferencias) {
+    for (const [id, importe, moneda, signo] of [[t.desde, t.sale, t.monedaSale, -1], [t.hacia, t.llega, t.monedaLlega, 1]]) {
+      const fila = porId.get(id);
+      if (!fila) continue;
+      const v = valorEn({ importe, moneda, fecha: t.fecha }, fila.moneda, tasas);
+      if (v == null) { fila.sinConvertir++; continue; }
+      fila.saldo += signo * v;
+      fila.n++;
+    }
   }
   return [...porId.values(), huerfana].filter((f) => f.cuenta.id !== null || f.n > 0);
 }
@@ -406,6 +419,8 @@ export function validarCopia(obj) {
       ok: true,
       datos: {
         version: VERSION_DATOS, moneda, inicioAño, categorias: normalizarArbol(categorias), cuentas, movimientos,
+        // Hasta la versión 8 no había transferencias entre cuentas.
+        transferencias: validarTransferencias(obj.transferencias, moneda),
         sinColocar: Array.isArray(obj.sinColocar) ? [...new Set(obj.sinColocar.filter((x) => ids.has(x)))] : [],
         // Hasta la versión 5 no había ingreso esperado.
         esperados: validarEsperados(obj.esperados),
@@ -424,6 +439,49 @@ export function validarCopia(obj) {
   } catch (e) {
     return { ok: false, error: 'No he podido leer el archivo.' };
   }
+}
+
+// ---------- Transferencias entre cuentas (v0.22) ----------
+// { id, fecha, desde, hacia, sale, monedaSale, llega, monedaLlega, nota, creado }: `sale` (en la moneda de la cuenta
+// de salida) deja `desde` y `llega` (en la de la cuenta de entrada) entra en `hacia`. Van aparte de los movimientos
+// para que no cuenten nunca como gasto ni ingreso: solo mueven el saldo de cada cuenta.
+
+/** Lo que falla de una transferencia antes de guardarla, en palabras de la persona; null si está bien. */
+export function comprobarTransferencia({ desde, hacia, sale, llega, fecha }) {
+  if (!desde || !hacia) return 'Elige de qué cuenta sale y a cuál llega.';
+  if (desde === hacia) return 'La cuenta de salida y la de entrada tienen que ser distintas.';
+  if (!Number.isInteger(sale) || sale <= 0) return 'Escribe cuánto sale (mayor que cero).';
+  if (!Number.isInteger(llega) || llega <= 0) return 'Escribe cuánto llega (mayor que cero).';
+  if (!esFechaISO(fecha)) return 'Elige una fecha.';
+  return null;
+}
+
+/** Transferencias del mes, más recientes primero. */
+export function transferenciasDelMes(transferencias, clave) {
+  return movimientosDelMes(transferencias || [], clave);
+}
+
+function validarTransferencias(lista, monedaApp) {
+  if (!Array.isArray(lista)) return [];
+  const ids = new Set();
+  const res = [];
+  for (const t of lista) {
+    if (!t || !esFechaISO(t.fecha) || !Number.isInteger(t.sale) || t.sale <= 0 || !Number.isInteger(t.llega) || t.llega <= 0) continue;
+    const desde = typeof t.desde === 'string' && t.desde ? t.desde : null;
+    const hacia = typeof t.hacia === 'string' && t.hacia ? t.hacia : null;
+    if (desde && desde === hacia) continue;
+    let id = typeof t.id === 'string' && t.id ? t.id : nuevoId();
+    while (ids.has(id)) id = nuevoId();
+    ids.add(id);
+    res.push({
+      id, fecha: t.fecha, desde, hacia,
+      sale: t.sale, monedaSale: MONEDAS[t.monedaSale] ? t.monedaSale : monedaApp,
+      llega: t.llega, monedaLlega: MONEDAS[t.monedaLlega] ? t.monedaLlega : monedaApp,
+      nota: typeof t.nota === 'string' ? t.nota.trim().slice(0, 200) : '',
+      creado: Number.isFinite(t.creado) ? t.creado : 0,
+    });
+  }
+  return res;
 }
 
 // ---------- Varias monedas ----------

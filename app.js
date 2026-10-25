@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '8432f1d1ff';
+const BUILD = 'ed897ef2d0';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -10,6 +10,8 @@ let año = añoDeHoy(); // primer mes del año que se ve en el Historial
 let rango = null; // en el Historial, { desde, hasta } si se mira un rango de meses en vez del año
 let vista = 'resumen';
 let editandoMov = null; // id del movimiento en edición, o null si es nuevo
+let editandoTrans = null; // id de la transferencia en edición, o null si es nueva
+let llegaTocado = false; // si la persona ha escrito a mano cuánto llega en una transferencia
 let editandoCat = null; // id de la categoría en edición, o null si es nueva
 let editandoCuenta = null; // id de la cuenta en edición, o null si es nueva
 let editandoEsperado = null; // grupo del ingreso esperado en edición, o null si es nuevo
@@ -174,13 +176,13 @@ function pintarResumen() {
     html += pistaDesglose(filas) + barrasCategorias(filas);
     html += `</div>`;
   }
-  const saldos = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda);
+  const saldos = C.saldosPorCuenta(datos.movimientos, datos.cuentas, datos.moneda, datos.transferencias);
   if (saldos.length) {
     const totales = new Map();
     for (const f of saldos) totales.set(f.moneda, (totales.get(f.moneda) || 0) + f.saldo);
     const cifra = (c, mon) => `${c < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(c), mon)}`;
     html += `<div class="tarjeta"><h2>Saldo de cada cuenta</h2>
-      <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado. Para ajustarlo, edita la cuenta en Ajustes.</p>`;
+      <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado y lo pasado entre cuentas. Para ajustarlo, edita la cuenta en Ajustes.</p>`;
     for (const f of saldos) {
       html += `
         <div class="cat-fila">
@@ -284,7 +286,9 @@ const pistaDesglose = (filas) => (filas.some((f) => f.hijos.length)
   ? '<p class="explica">Toca una categoría con › para ver en qué se fue por dentro.</p>' : '');
 
 function pintarMovimientos() {
-  const lista = C.movimientosDelMes(datos.movimientos, mes);
+  // Gastos, ingresos y transferencias del mes juntos, por día (las transferencias llevan `esTrans`).
+  const lista = [...C.movimientosDelMes(datos.movimientos, mes), ...C.transferenciasDelMes(datos.transferencias, mes).map((t) => ({ ...t, esTrans: true }))]
+    .sort((x, y) => (y.fecha.localeCompare(x.fecha)) || ((y.creado || 0) - (x.creado || 0)));
   if (!lista.length) {
     $('#vista-movimientos').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📭</span>
       No hay movimientos en ${esc(C.nombreMes(mes).toLowerCase())}.</div>`;
@@ -299,6 +303,7 @@ function pintarMovimientos() {
       diaActual = m.fecha;
       html += `<h3 class="dia">${esc(C.fechaDMA(m.fecha))}</h3><ul class="lista">`;
     }
+    if (m.esTrans) { html += filaTransferencia(m); continue; }
     const c = categoria(m.categoria);
     const signo = m.tipo === 'ingreso' ? '+' : '−';
     const moneda = m.moneda || datos.moneda;
@@ -319,6 +324,21 @@ function pintarMovimientos() {
   }
   html += `</ul>`;
   $('#vista-movimientos').innerHTML = html;
+}
+
+/** Una transferencia en la lista: "A → B", con lo que sale y, si es otra moneda, lo que llega. */
+function filaTransferencia(t) {
+  const importe = t.monedaSale === t.monedaLlega && t.sale === t.llega
+    ? C.formatoMoneda(t.sale, t.monedaSale)
+    : `${C.formatoMoneda(t.sale, t.monedaSale)} → ${C.formatoMoneda(t.llega, t.monedaLlega)}`;
+  return `<li><button type="button" class="mov transferencia" data-accion="editar-trans" data-id="${esc(t.id)}">
+      <span class="emoji" aria-hidden="true">🔁</span>
+      <span class="texto">
+        <span class="titulo">${esc(`${cuenta(t.desde).nombre} → ${cuenta(t.hacia).nombre}`)}</span>
+        <span class="detalle">${esc(t.nota ? `Entre cuentas · ${t.nota}` : 'Entre cuentas')}</span>
+      </span>
+      <span class="importe trans">${esc(importe)}</span>
+    </button></li>`;
 }
 
 /** Los meses que se ven en el Historial: el rango elegido o los 12 del año. */
@@ -705,24 +725,26 @@ function catSeleccionada() {
   return catElegida;
 }
 
-function abrirMovimiento(id = null) {
+function abrirMovimiento(id = null, tipoInicial = 'gasto', fechaInicial = null) {
   editandoMov = id;
   const m = id ? datos.movimientos.find((x) => x.id === id) : null;
   $('#dlg-mov-titulo').textContent = m ? 'Editar movimiento' : 'Nuevo movimiento';
   $('#mov-borrar').hidden = !m;
+  $('#mov-a-transferencia').hidden = !!m; // un gasto o ingreso ya apuntado no se convierte en transferencia
+  $('#mov-a-transferencia').parentElement.classList.toggle('tres', !m);
   $('#mov-error').hidden = true;
   const moneda = m ? (m.moneda || datos.moneda) : (ultimaMoneda || datos.moneda);
   $('#mov-moneda').innerHTML = Object.keys(C.MONEDAS)
     .map((cod) => `<label><input type="radio" name="moneda" value="${cod}" ${cod === moneda ? 'checked' : ''}><span>${cod}</span></label>`).join('');
   baseTocada = !!(m && m.importeBase && m.monedaBase === datos.moneda);
   $('#mov-importe-base').value = baseTocada ? C.importeEditable(m.importeBase) : '';
-  const tipo = m ? m.tipo : 'gasto';
+  const tipo = m ? m.tipo : tipoInicial;
   document.querySelector(`#form-mov input[name="tipo"][value="${tipo}"]`).checked = true;
   $('#mov-importe').value = m ? C.importeEditable(m.importe) : '';
   $('#mov-nota').value = m ? m.nota : '';
   // Si se está viendo otro mes, la fecha por defecto cae en ese mes (día 1), no en hoy.
   const hoy = C.hoyISO();
-  $('#mov-fecha').value = m ? m.fecha : (C.claveMes(hoy) === mes ? hoy : `${mes}-01`);
+  $('#mov-fecha').value = m ? m.fecha : (fechaInicial || (C.claveMes(hoy) === mes ? hoy : `${mes}-01`));
   pintarChips(m ? m.categoria : categoriaPorDefecto(tipo)?.id);
   mostrarDivision(false);
   const cuentaDef = datos.cuentas.find((c) => c.id === ultimaCuenta) || datos.cuentas[0];
@@ -832,6 +854,113 @@ async function borrarMovimiento() {
   datos.movimientos = datos.movimientos.filter((m) => m.id !== id);
   guardar();
   aviso('Movimiento borrado');
+  pintar();
+}
+
+// ---------- Transferencias entre cuentas ----------
+// Se apuntan desde el mismo "+" (pestaña "Entre cuentas"). Cuánto sale va en la moneda de la cuenta de salida y
+// cuánto llega en la de la de entrada; si las dos tienen la misma moneda, lo que llega se copia de lo que sale.
+
+const monedaCuenta = (id) => datos.cuentas.find((c) => c.id === id)?.moneda || datos.moneda;
+const cuentaMarcada = (sel) => document.querySelector(`${sel} [aria-checked="true"]`)?.dataset.cuenta || null;
+
+function pintarCuentasTrans(sel, seleccion) {
+  $(sel).innerHTML = datos.cuentas.map((c) => `
+    <button type="button" class="chip" role="radio" aria-checked="${c.id === seleccion}" data-cuenta="${esc(c.id)}">
+      <span aria-hidden="true">${esc(emojiCuenta(c))}</span>${esc(c.nombre)}${(c.moneda || datos.moneda) !== datos.moneda ? ` (${esc(c.moneda)})` : ''}
+    </button>`).join('');
+}
+
+function abrirTransferencia(id = null, fechaInicial = null) {
+  editandoTrans = id;
+  const t = id ? datos.transferencias.find((x) => x.id === id) : null;
+  $('#dlg-trans-titulo').textContent = t ? 'Editar paso entre cuentas' : 'Pasar dinero entre cuentas';
+  $('#trans-tipos').hidden = !!t;
+  document.querySelector('#form-trans input[name="trans-tipo"][value="transferencia"]').checked = true;
+  $('#trans-borrar').hidden = !t;
+  $('#trans-error').hidden = true;
+  const pocas = datos.cuentas.length < 2 && !t;
+  $('#trans-pocas').hidden = !pocas;
+  $('#trans-campos').hidden = pocas;
+  $('#trans-guardar').hidden = pocas;
+  const desde = t ? t.desde : (datos.cuentas.find((c) => c.id === ultimaCuenta) || datos.cuentas[0])?.id;
+  const hacia = t ? t.hacia : datos.cuentas.find((c) => c.id !== desde)?.id;
+  pintarCuentasTrans('#trans-desde', desde);
+  pintarCuentasTrans('#trans-hacia', hacia);
+  $('#trans-sale').value = t ? C.importeEditable(t.sale) : '';
+  $('#trans-llega').value = t ? C.importeEditable(t.llega) : '';
+  llegaTocado = !!t && !(t.monedaSale === t.monedaLlega && t.sale === t.llega);
+  $('#trans-nota').value = t ? t.nota : '';
+  const hoy = C.hoyISO();
+  $('#trans-fecha').value = t ? t.fecha : (fechaInicial || (C.claveMes(hoy) === mes ? hoy : `${mes}-01`));
+  actualizarTrans();
+  $('#dlg-trans').showModal();
+  if (!t && !pocas) setTimeout(() => $('#trans-sale').focus(), 50);
+}
+
+/** Etiquetas con la moneda de cada lado, lo que llega propuesto y el tipo de cambio que sale de lo escrito. */
+function actualizarTrans() {
+  const mSale = monedaCuenta(cuentaMarcada('#trans-desde'));
+  const mLlega = monedaCuenta(cuentaMarcada('#trans-hacia'));
+  const nombre = (m) => nombreCorto[m] || m;
+  $('#trans-sale-etiqueta').textContent = `Cuánto sale (en ${nombre(mSale)})`;
+  $('#trans-llega-etiqueta').textContent = `Cuánto llega (en ${nombre(mLlega)})`;
+  const sale = C.parseImporte($('#trans-sale').value);
+  const nota = $('#trans-tasa');
+  if (mSale === mLlega) {
+    if (!llegaTocado) $('#trans-llega').value = $('#trans-sale').value;
+    $('#trans-llega').placeholder = '0';
+    nota.textContent = 'Si llegó menos (por una comisión), cámbialo.';
+    return;
+  }
+  if (!llegaTocado) $('#trans-llega').value = '';
+  // Lo propuesto, de sombra: el tipo de cambio de lo ya apuntado (movimientos y otras transferencias).
+  const fecha = C.esFechaISO($('#trans-fecha').value) ? $('#trans-fecha').value : C.hoyISO();
+  const comoMovs = datos.transferencias.filter((x) => x.id !== editandoTrans)
+    .map((x) => ({ moneda: x.monedaSale, importe: x.sale, monedaBase: x.monedaLlega, importeBase: x.llega, fecha: x.fecha }));
+  const tasa = C.tasa(C.tasasImplicitas([...datos.movimientos, ...comoMovs]), mSale, mLlega, C.claveMes(fecha));
+  $('#trans-llega').placeholder = sale != null && tasa != null ? C.importeEditable(Math.round(sale * tasa)) : '0';
+  const llega = C.parseImporte($('#trans-llega').value);
+  nota.textContent = sale != null && llega != null
+    ? `Tipo de cambio: ${C.textoTipoDeCambio(mSale, mLlega, llega / sale)}`
+    : 'Escribe lo que salió de una y lo que llegó a la otra: así cuadra el cambio.';
+}
+
+function guardarTransferencia() {
+  const desde = cuentaMarcada('#trans-desde');
+  const hacia = cuentaMarcada('#trans-hacia');
+  const sale = C.parseImporte($('#trans-sale').value);
+  const llega = C.parseImporte($('#trans-llega').value);
+  const fecha = $('#trans-fecha').value;
+  const err = $('#trans-error');
+  const fallo = C.comprobarTransferencia({ desde, hacia, sale, llega, fecha });
+  if (fallo) { err.textContent = fallo; err.hidden = false; return; }
+  const campos = {
+    fecha, desde, hacia, sale, monedaSale: monedaCuenta(desde), llega, monedaLlega: monedaCuenta(hacia),
+    nota: $('#trans-nota').value.trim().slice(0, 200),
+  };
+  if (editandoTrans) {
+    const t = datos.transferencias.find((x) => x.id === editandoTrans);
+    if (t) Object.assign(t, campos);
+  } else {
+    datos.transferencias.push({ id: C.nuevoId(), creado: Date.now(), ...campos });
+  }
+  if (!guardar()) return;
+  $('#dlg-trans').close();
+  mes = C.claveMes(fecha);
+  año = C.inicioDelAño(mes, datos.inicioAño);
+  aviso(editandoTrans ? 'Cambios guardados' : 'Paso entre cuentas apuntado');
+  pintar();
+}
+
+async function borrarTransferencia() {
+  const id = editandoTrans;
+  $('#dlg-trans').close();
+  const ok = await confirmar({ titulo: '¿Borrar este paso entre cuentas?', texto: 'Los saldos de las dos cuentas vuelven a como estaban. No se puede deshacer.', si: 'Borrar' });
+  if (!ok) { abrirTransferencia(id); return; }
+  datos.transferencias = datos.transferencias.filter((t) => t.id !== id);
+  guardar();
+  aviso('Paso entre cuentas borrado');
   pintar();
 }
 
@@ -1316,17 +1445,20 @@ async function borrarCuenta() {
   const id = editandoCuenta;
   const c = datos.cuentas.find((x) => x.id === id);
   const usos = datos.movimientos.filter((m) => m.cuenta === id).length;
+  const pasos = datos.transferencias.filter((t) => t.desde === id || t.hacia === id).length;
   $('#dlg-cuenta').close();
   const ok = await confirmar({
     titulo: `¿Borrar «${c ? c.nombre : ''}»?`,
-    texto: usos
+    texto: (usos
       ? `Tiene ${usos} movimiento${usos === 1 ? '' : 's'}. No se borran: quedarán «Sin cuenta».`
-      : 'No tiene movimientos.',
+      : 'No tiene movimientos.')
+      + (pasos ? ` Tiene también ${plural(pasos, 'paso', 'pasos')} entre cuentas: se quedan, con «Sin cuenta» en su lugar.` : ''),
     si: 'Borrar',
   });
   if (!ok) { abrirCuenta(id); return; }
   datos.cuentas = datos.cuentas.filter((x) => x.id !== id);
   for (const m of datos.movimientos) if (m.cuenta === id) m.cuenta = null;
+  for (const t of datos.transferencias) { if (t.desde === id) t.desde = null; if (t.hacia === id) t.hacia = null; }
   if (ultimaCuenta === id) ultimaCuenta = null;
   guardar();
   aviso('Cuenta borrada');
@@ -1786,10 +1918,11 @@ async function importar(archivo) {
   if (!r.trae.catalogo && datos.catalogo.length) { r.datos.catalogo = datos.catalogo; guarda.push('tus artículos de compra'); }
   const extra = [];
   if (r.trae.eventos && r.datos.eventos.length) extra.push(plural(r.datos.eventos.length, 'fecha en el calendario', 'fechas en el calendario'));
+  if (r.datos.transferencias.length) extra.push(plural(r.datos.transferencias.length, 'paso entre cuentas', 'pasos entre cuentas'));
   if (r.trae.compra && r.datos.compra.length) extra.push(plural(r.datos.compra.length, 'cosa en la lista de compra', 'cosas en la lista de compra'));
   const ok = await confirmar({
     titulo: '¿Recuperar esta copia?',
-    texto: `Tiene ${n} movimiento${n === 1 ? '' : 's'}${extra.length ? ` y ${extra.join(' y ')}` : ''}. Sustituye todo lo que hay ahora en este móvil${guarda.length ? `, salvo ${guarda.join(' y ')}, que la copia no trae` : ''}.`,
+    texto: `Tiene ${n} movimiento${n === 1 ? '' : 's'}${extra.length ? `, ${extra.join(', ')}` : ''}. Sustituye todo lo que hay ahora en este móvil${guarda.length ? `, salvo ${guarda.join(' y ')}, que la copia no trae` : ''}.`,
     si: 'Recuperar',
     peligro: false,
   });
@@ -1857,7 +1990,7 @@ async function traerWallet(archivo) {
 async function borrarTodo() {
   const ok = await confirmar({
     titulo: '¿Borrar todo?',
-    texto: 'Se borran todos los movimientos, categorías, cuentas y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
+    texto: 'Se borran todos los movimientos, pasos entre cuentas, categorías, cuentas y presupuestos de este móvil. Si no tienes una copia, no se podrá recuperar.',
     si: 'Borrar todo',
   });
   if (!ok) return;
@@ -1879,6 +2012,13 @@ document.addEventListener('click', (e) => {
   if (chip) { pintarChips(chip.dataset.cat); return; }
   const chip2 = e.target.closest('#mov-categorias2 .chip');
   if (chip2) { pintarChips(chip2.dataset.cat, 2); return; }
+  const chipTrans = e.target.closest('#trans-desde .chip, #trans-hacia .chip');
+  if (chipTrans) {
+    for (const b of chipTrans.parentElement.querySelectorAll('.chip')) b.setAttribute('aria-checked', String(b === chipTrans));
+    $('#trans-error').hidden = true;
+    actualizarTrans();
+    return;
+  }
   const chipCuenta = e.target.closest('#mov-cuentas .chip');
   if (chipCuenta) {
     for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(b === chipCuenta));
@@ -1901,6 +2041,8 @@ document.addEventListener('click', (e) => {
     case 'guardado-editar': editandoGuardados = !editandoGuardados; pintarGuardados(); break;
     case 'editar-mov': abrirMovimiento(el.dataset.id); break;
     case 'borrar-mov': borrarMovimiento(); break;
+    case 'editar-trans': abrirTransferencia(el.dataset.id); break;
+    case 'borrar-trans': borrarTransferencia(); break;
     case 'dividir-mov': mostrarDivision(true); break;
     case 'quitar-division': mostrarDivision(false); break;
     case 'editar-cat': abrirCategoria(el.dataset.id); break;
@@ -2008,6 +2150,19 @@ $('#sel-lista').addEventListener('change', (e) => {
 $('#sel-destino').addEventListener('change', () => { $('#sel-error').hidden = true; contarSeleccion(); });
 
 $('#form-mov').addEventListener('submit', (e) => { e.preventDefault(); guardarMovimiento(); });
+$('#form-trans').addEventListener('submit', (e) => { e.preventDefault(); guardarTransferencia(); });
+$('#trans-sale').addEventListener('input', actualizarTrans);
+$('#trans-llega').addEventListener('input', () => { llegaTocado = $('#trans-llega').value.trim() !== ''; actualizarTrans(); });
+$('#trans-fecha').addEventListener('change', actualizarTrans);
+// Desde "Pasar dinero entre cuentas", Gasto o Ingreso vuelven a la hoja de siempre (con la misma fecha).
+for (const r of document.querySelectorAll('#form-trans input[name="trans-tipo"]')) {
+  r.addEventListener('change', () => {
+    if (r.value === 'transferencia' || !r.checked) return;
+    const fecha = $('#trans-fecha').value;
+    $('#dlg-trans').close();
+    abrirMovimiento(null, r.value, C.esFechaISO(fecha) ? fecha : null);
+  });
+}
 $('#form-cat').addEventListener('submit', (e) => { e.preventDefault(); guardarCategoria(); });
 $('#form-cuenta').addEventListener('submit', (e) => { e.preventDefault(); guardarCuenta(); });
 $('#form-esperado').addEventListener('submit', (e) => { e.preventDefault(); guardarEsperado(); });
@@ -2018,6 +2173,12 @@ for (const r of document.querySelectorAll('#form-evento input[name="ev-tipo"]'))
 $('#ev-anual').addEventListener('change', () => { anualTocado = true; });
 for (const r of document.querySelectorAll('#form-mov input[name="tipo"]')) {
   r.addEventListener('change', () => {
+    if (tipoMov() === 'transferencia') {
+      const fecha = $('#mov-fecha').value;
+      $('#dlg-mov').close();
+      abrirTransferencia(null, C.esFechaISO(fecha) ? fecha : null);
+      return;
+    }
     pintarChips(categoriaPorDefecto(tipoMov())?.id);
     if (!$('#mov-division').hidden) { catElegida2 = null; pintarChips(null, 2); }
     actualizarBase();
