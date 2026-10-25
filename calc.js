@@ -359,6 +359,18 @@ export function contarSinCuenta(movimientos, transferencias, cuentas) {
 }
 
 /**
+ * Lo que está "Sin cuenta" (v0.27), para verlo antes de pasarlo a una cuenta: los movimientos y los pasos entre
+ * cuentas de contarSinCuenta, juntos y de más reciente a más antiguo (los pasos llevan `esTrans: true`).
+ */
+export function listaSinCuenta(movimientos, transferencias, cuentas) {
+  const ids = new Set(cuentas.map((c) => c.id));
+  return [
+    ...movimientos.filter((m) => !ids.has(m.cuenta)),
+    ...(transferencias || []).filter((t) => !ids.has(t.desde) || !ids.has(t.hacia)).map((t) => ({ ...t, esTrans: true })),
+  ].sort((x, y) => (y.fecha || '').localeCompare(x.fecha || '') || ((y.creado || 0) - (x.creado || 0)));
+}
+
+/**
  * Pasa a la cuenta `destino` lo de `origen` (el id de una cuenta) o, si `origen` es null, todo lo que está
  * "Sin cuenta". No toca lo que recibe: devuelve { movimientos, transferencias } nuevas y los recuentos `n`
  * (movimientos pasados), `pasos` (pasos entre cuentas cambiados) y `mismos` (pasos que se quedan como estaban

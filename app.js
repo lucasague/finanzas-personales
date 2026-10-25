@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '9e8b82ad29';
+const BUILD = '5a2f8661e6';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -219,11 +219,14 @@ function pintarResumen() {
   $('#vista-resumen').innerHTML = html;
 }
 
-/** La fila «Sin cuenta» del Resumen (v0.26): se toca para pasar todo eso a una cuenta, y entonces desaparece. */
+/**
+ * La fila «Sin cuenta» del Resumen (v0.26): se toca para ver lo que hay sin cuenta (v0.27) y, desde ahí, pasarlo
+ * a una cuenta; entonces desaparece.
+ */
 function filaSinCuenta(importe, negativo) {
   return `
-    <button type="button" class="cat-edit" data-accion="asignar-sin-cuenta">
-      <span class="texto"><span>❔ Sin cuenta</span><br><span class="detalle">Toca para pasarlos a una cuenta</span></span>
+    <button type="button" class="cat-edit" data-accion="ver-sin-cuenta">
+      <span class="texto"><span>❔ Sin cuenta</span><br><span class="detalle">Toca para verlos y pasarlos a una cuenta</span></span>
       <span class="importe ${negativo ? 'gasto' : 'ingreso'}">${esc(importe)}</span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`;
@@ -1555,40 +1558,94 @@ function elegirCuenta({ titulo, texto, si = 'Seguir', excepto = null }) {
   });
 }
 
-/** La fila «Sin cuenta» del Resumen: pasa todo lo que está sin cuenta a la que se elija. */
+let listaSinCuentaAbierta = false; // para volver a la lista «Sin cuenta» tras abrir uno de sus movimientos
+
+/**
+ * La lista de lo que está «Sin cuenta» (v0.27): se ve antes de pasarlo a una cuenta. Tocar uno lo abre (ahí se le
+ * puede poner su cuenta); abajo, "Asignar todos a una cuenta".
+ */
+function verSinCuenta() {
+  listaSinCuentaAbierta = true;
+  const lista = C.listaSinCuenta(datos.movimientos, datos.transferencias, datos.cuentas);
+  const s = C.contarSinCuenta(datos.movimientos, datos.transferencias, datos.cuentas);
+  $('#sin-cuenta-texto').textContent = lista.length
+    ? `${textoCuantos(s.movimientos, s.pasos)} sin cuenta, de cualquier mes. Toca uno para verlo o ponerle su cuenta. O pásalos todos a la vez con el botón de abajo.`
+    : '';
+  const html = lista.map((m) => {
+    const fecha = C.fechaDMA(m.fecha);
+    if (m.esTrans) {
+      const importe = m.monedaSale === m.monedaLlega && m.sale === m.llega
+        ? C.formatoMoneda(m.sale, m.monedaSale)
+        : `${C.formatoMoneda(m.sale, m.monedaSale)} → ${C.formatoMoneda(m.llega, m.monedaLlega)}`;
+      return `<li><button type="button" class="mov transferencia" data-accion="editar-trans-sin-cuenta" data-id="${esc(m.id)}">
+        <span class="emoji" aria-hidden="true">🔁</span>
+        <span class="texto">
+          <span class="titulo">${esc(`${cuenta(m.desde).nombre} → ${cuenta(m.hacia).nombre}`)}</span>
+          <span class="detalle">${esc(`${fecha} · Paso entre cuentas${m.nota ? ` · ${m.nota}` : ''}`)}</span>
+        </span>
+        <span class="importe trans">${esc(importe)}</span>
+      </button></li>`;
+    }
+    const c = categoria(m.categoria);
+    const ruta = c.id ? rutaDe(c.id) : c.nombre;
+    const tipo = m.tipo === 'ingreso' ? 'Ingreso' : 'Gasto';
+    const signo = m.tipo === 'ingreso' ? '+' : '−';
+    return `<li><button type="button" class="mov" data-accion="editar-mov-sin-cuenta" data-id="${esc(m.id)}">
+      <span class="emoji" aria-hidden="true">${esc(c.id ? emojiDe(c) : c.emoji)}</span>
+      <span class="texto">
+        <span class="titulo">${esc(m.nota || ruta)}</span>
+        <span class="detalle">${esc(`${fecha} · ${m.nota ? `${ruta} · ` : ''}${tipo}`)}</span>
+      </span>
+      <span class="importe ${m.tipo}">${signo}${esc(C.formatoMoneda(m.importe, m.moneda || datos.moneda))}</span>
+    </button></li>`;
+  }).join('');
+  $('#sin-cuenta-lista').innerHTML = lista.length ? `<ul class="lista">${html}</ul>` : '<p class="subtitulo">Ya no queda nada sin cuenta.</p>';
+  $('#sin-cuenta-acciones').hidden = !lista.length;
+  if (!$('#dlg-sin-cuenta').open) $('#dlg-sin-cuenta').showModal();
+}
+
+/** Desde la lista «Sin cuenta»: pasa todo a una cuenta y, si se echa atrás, vuelve a la lista. */
+async function asignarTodosSinCuenta() {
+  listaSinCuentaAbierta = false;
+  $('#dlg-sin-cuenta').close();
+  if (!(await asignarSinCuenta())) verSinCuenta();
+}
+
+/** Pasa todo lo que está sin cuenta a la que se elija. Devuelve true si se pasó (o no quedaba nada). */
 async function asignarSinCuenta() {
   const s = C.contarSinCuenta(datos.movimientos, datos.transferencias, datos.cuentas);
-  if (!s.movimientos && !s.pasos) { pintar(); return; }
+  if (!s.movimientos && !s.pasos) { pintar(); return true; }
   if (!datos.cuentas.length) {
     await confirmar({
       titulo: 'Primero, una cuenta',
       texto: 'Para pasar estos movimientos a una cuenta, primero crea una en Ajustes, en Cuentas.',
       si: 'Entendido', peligro: false, soloAceptar: true,
     });
-    return;
+    return true;
   }
   const destino = await elegirCuenta({
     titulo: 'Pasar a una cuenta',
     texto: `Hay ${textoCuantos(s.movimientos, s.pasos)} sin cuenta. Elige a qué cuenta van y dejarán de salir como «Sin cuenta».`,
   });
-  if (!destino) return;
+  if (!destino) return false;
   const r = C.pasarACuenta(datos.movimientos, datos.transferencias, datos.cuentas, destino);
-  if (!r) return;
+  if (!r) return false;
   const nombre = cuenta(destino).nombre;
-  if (!r.n && !r.pasos) { aviso(`No hay nada que pasar a «${nombre}»`); return; }
+  if (!r.n && !r.pasos) { aviso(`No hay nada que pasar a «${nombre}»`); return false; }
   const ok = await confirmar({
     titulo: `¿Pasar ${textoCuantos(r.n, r.pasos)} a «${nombre}»?`,
     texto: `Todo lo que ahora sale como «Sin cuenta» pasa a «${nombre}», y su saldo cambiará con lo que suman. Si luego alguno no era de ahí, lo cambias tocándolo en Movimientos.`,
     si: 'Sí, pasarlos',
     peligro: false,
   });
-  if (!ok) return;
+  if (!ok) return false;
   const antes = { movimientos: datos.movimientos, transferencias: datos.transferencias };
   datos.movimientos = r.movimientos;
   datos.transferencias = r.transferencias;
-  if (!guardar()) { Object.assign(datos, antes); return; }
+  if (!guardar()) { Object.assign(datos, antes); return false; }
   pintar();
   aviso(`Listo: ${textoCuantos(r.n, r.pasos)} en «${nombre}»`);
+  return true;
 }
 
 async function borrarCuenta() {
@@ -2494,7 +2551,10 @@ document.addEventListener('click', (e) => {
     case 'editar-cuenta': abrirCuenta(el.dataset.id); break;
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
-    case 'asignar-sin-cuenta': asignarSinCuenta(); break;
+    case 'ver-sin-cuenta': verSinCuenta(); break;
+    case 'sin-cuenta-todos': asignarTodosSinCuenta(); break;
+    case 'editar-mov-sin-cuenta': $('#dlg-sin-cuenta').close(); listaSinCuentaAbierta = true; abrirMovimiento(el.dataset.id); break;
+    case 'editar-trans-sin-cuenta': $('#dlg-sin-cuenta').close(); listaSinCuentaAbierta = true; abrirTransferencia(el.dataset.id); break;
     case 'a-cuenta-ok': if (alElegirCuenta) alElegirCuenta(); break;
     case 'poner-saldo-hoy': guardarCuenta({ desdeHoy: true }); break;
     case 'cuenta-a-deuda': mostrarCuentaADeuda(); break;
@@ -2551,6 +2611,22 @@ $('#dlg-mov').addEventListener('close', () => {
 });
 $('#dlg-movs-cat').addEventListener('close', () => {
   setTimeout(() => { if (!$('#dlg-mov').open && !$('#dlg-movs-cat').open) listaDeCat = null; }, 0);
+});
+
+// Lo mismo con la lista «Sin cuenta» (v0.27): al cerrar el movimiento o el paso que se abrió desde ella, se vuelve.
+for (const sel of ['#dlg-mov', '#dlg-trans']) {
+  $(sel).addEventListener('close', () => {
+    setTimeout(() => {
+      if (!listaSinCuentaAbierta || $('#dlg-mov').open || $('#dlg-trans').open || $('#dlg-sin-cuenta').open) return;
+      if ($('#dlg-confirmar').open) listaSinCuentaAbierta = false;
+      else verSinCuenta();
+    }, 0);
+  });
+}
+$('#dlg-sin-cuenta').addEventListener('close', () => {
+  setTimeout(() => {
+    if (!$('#dlg-mov').open && !$('#dlg-trans').open && !$('#dlg-sin-cuenta').open) listaSinCuentaAbierta = false;
+  }, 0);
 });
 
 // "Mover por texto": la vista previa cambia según se escribe, se elige la categoría o se quita una marca.
