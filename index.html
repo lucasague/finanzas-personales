@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="3eb9ed4516">
+  <meta name="version" content="a482025670">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -45,7 +45,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.28 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.29 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>
@@ -99,6 +99,7 @@
       <div id="mov-cuenta-bloque">
         <p class="etiqueta-moneda">Cuenta</p>
         <div class="chips" id="mov-cuentas" role="radiogroup" aria-label="Cuenta"></div>
+        <p class="nota-tasa" id="mov-cuenta-pista"></p>
       </div>
       <label class="campo">
         <span>Nota</span>
@@ -351,6 +352,12 @@
     <div id="sin-cuenta-lista"></div>
     <div class="acciones" id="sin-cuenta-acciones">
       <button type="button" class="boton principal" data-accion="sin-cuenta-todos">Asignar todos a una cuenta</button>
+    </div>
+    <div id="sin-cuenta-deshacer" hidden>
+      <p class="explica" id="sin-cuenta-deshacer-texto"></p>
+      <div class="acciones">
+        <button type="button" class="boton" data-accion="deshacer-asignacion">↩️ Deshacer</button>
+      </div>
     </div>
   </dialog>
 

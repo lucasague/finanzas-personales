@@ -356,6 +356,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   background: var(--texto); color: var(--fondo); padding: 10px 16px; border-radius: 99px;
   font-size: .92rem; z-index: 20; max-width: calc(100% - 32px); text-align: center;
 }
+.toast-boton {
+  margin-left: 8px; padding: 4px 10px; border: 1px solid currentColor; border-radius: 99px;
+  background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer;
+}
 .aviso {
   display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
   background: var(--acento); color: var(--acento-texto);

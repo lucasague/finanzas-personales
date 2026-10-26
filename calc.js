@@ -402,6 +402,67 @@ export function pasarACuenta(movimientos, transferencias, cuentas, destino, orig
   return { movimientos: movs, transferencias: trans, n, pasos, mismos };
 }
 
+/**
+ * Lo necesario para deshacer una asignación de lo "Sin cuenta" a la cuenta `destino` (v0.29): compara antes y
+ * después y guarda solo los ids y la cuenta que tenían. Movimientos que estaban sin cuenta (o con una cuenta que
+ * ya no existe en `cuentas`) y ahora son de `destino` → { id, cuenta }; pasos entre cuentas → { id, desde?, hacia? },
+ * solo con el lado que cambió. null si no se asignó nada.
+ */
+export function registroAsignacion(movsAntes, transAntes, movsDespues, transDespues, cuentas, destino) {
+  const ids = new Set(cuentas.map((c) => c.id));
+  if (!ids.has(destino)) return null;
+  const antesM = new Map((movsAntes || []).map((m) => [m.id, m]));
+  const antesT = new Map((transAntes || []).map((t) => [t.id, t]));
+  const movs = [];
+  for (const m of movsDespues || []) {
+    const a = antesM.get(m.id);
+    if (a && !ids.has(a.cuenta) && m.cuenta === destino) movs.push({ id: m.id, cuenta: a.cuenta ?? null });
+  }
+  const pasos = [];
+  for (const t of transDespues || []) {
+    const a = antesT.get(t.id);
+    if (!a) continue;
+    const p = { id: t.id };
+    if (!ids.has(a.desde) && t.desde === destino) p.desde = a.desde ?? null;
+    if (!ids.has(a.hacia) && t.hacia === destino) p.hacia = a.hacia ?? null;
+    if ('desde' in p || 'hacia' in p) pasos.push(p);
+  }
+  return movs.length || pasos.length ? { cuenta: destino, movimientos: movs, pasos } : null;
+}
+
+/**
+ * Deshace la última asignación (el registro de registroAsignacion): lo que sigue en esa cuenta vuelve a como estaba
+ * ("Sin cuenta"). Lo que ya se cambió a otra cuenta, se borró, o si la cuenta ya no existe, no se toca. No modifica
+ * lo que recibe: devuelve { movimientos, transferencias, n, pasos } (n y pasos: cuántos vuelven). Nunca lanza.
+ */
+export function deshacerAsignacion(movimientos, transferencias, cuentas, registro) {
+  const nada = { movimientos, transferencias, n: 0, pasos: 0 };
+  if (!registro || typeof registro !== 'object' || !cuentas.some((c) => c.id === registro.cuenta)) return nada;
+  const destino = registro.cuenta;
+  const regM = new Map((Array.isArray(registro.movimientos) ? registro.movimientos : [])
+    .filter((x) => x && typeof x === 'object').map((x) => [x.id, x]));
+  const regT = new Map((Array.isArray(registro.pasos) ? registro.pasos : [])
+    .filter((x) => x && typeof x === 'object').map((x) => [x.id, x]));
+  let n = 0;
+  let pasos = 0;
+  const movs = movimientos.map((m) => {
+    const r = regM.get(m.id);
+    if (!r || m.cuenta !== destino) return m;
+    n++;
+    return { ...m, cuenta: r.cuenta ?? null };
+  });
+  const trans = (transferencias || []).map((t) => {
+    const r = regT.get(t.id);
+    if (!r) return t;
+    const d = 'desde' in r && t.desde === destino;
+    const h = 'hacia' in r && t.hacia === destino;
+    if (!d && !h) return t;
+    pasos++;
+    return { ...t, desde: d ? (r.desde ?? null) : t.desde, hacia: h ? (r.hacia ?? null) : t.hacia };
+  });
+  return { movimientos: movs, transferencias: trans, n, pasos };
+}
+
 /** Como parseImporteOCero, pero acepta un menos delante: el saldo de una tarjeta puede ser una deuda. */
 export function parseSaldo(texto) {
   const t = String(texto ?? '').trim();

@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = '3eb9ed4516';
+const BUILD = 'a482025670';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -82,12 +82,79 @@ const cuenta = (id) => datos.cuentas.find((c) => c.id === id) || { id: null, nom
 const emojiCuenta = (c) => (C.TIPOS_CUENTA[c.tipo] || { emoji: '❔' }).emoji;
 
 let temporizadorAviso;
-function aviso(texto) {
+let accionAviso = null; // lo que hace el botón del aviso (p. ej. «Deshacer»), si lo lleva
+function aviso(texto, boton = null) {
   const t = $('#toast');
   t.textContent = texto;
+  accionAviso = boton ? boton.hacer : null;
+  if (boton) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-boton';
+    b.dataset.accion = 'aviso-boton';
+    b.textContent = boton.texto;
+    t.append(' ', b);
+  }
   t.hidden = false;
   clearTimeout(temporizadorAviso);
-  temporizadorAviso = setTimeout(() => { t.hidden = true; }, 2600);
+  temporizadorAviso = setTimeout(() => { t.hidden = true; accionAviso = null; }, boton ? 8000 : 2600);
+}
+
+// ---------- Deshacer la última asignación de lo «Sin cuenta» (v0.29) ----------
+// Solo se guarda en este móvil, aparte de los datos, y solo ids y la cuenta que tenían (registroAsignacion).
+const CLAVE_DESHACER = 'finanzas.deshacer.v1';
+
+function leerDeshacer() {
+  try { return JSON.parse(localStorage.getItem(CLAVE_DESHACER) || 'null'); } catch (e) { return null; }
+}
+
+function guardarDeshacer(reg) {
+  try {
+    if (reg) localStorage.setItem(CLAVE_DESHACER, JSON.stringify(reg));
+    else localStorage.removeItem(CLAVE_DESHACER);
+  } catch (e) { /* sin almacenamiento: solo queda el botón del aviso */ }
+}
+
+/** Lo que se puede deshacer ahora: { reg, n, pasos, nombre } o null si no queda nada. */
+function pendienteDeshacer() {
+  const reg = leerDeshacer();
+  const d = C.deshacerAsignacion(datos.movimientos, datos.transferencias, datos.cuentas, reg);
+  return d.n || d.pasos ? { reg, n: d.n, pasos: d.pasos, nombre: cuenta(reg.cuenta).nombre } : null;
+}
+
+/** Tras asignar lo «Sin cuenta» a `destino`: guarda cómo estaba y avisa con el botón «Deshacer». */
+function apuntarAsignacion(movsAntes, transAntes, destino, texto) {
+  const reg = C.registroAsignacion(movsAntes, transAntes, datos.movimientos, datos.transferencias, datos.cuentas, destino);
+  if (!reg) { aviso(texto); return; }
+  guardarDeshacer(reg);
+  aviso(texto, { texto: 'Deshacer', hacer: deshacerAsignacion });
+}
+
+function deshacerAsignacion() {
+  const p = pendienteDeshacer();
+  if (!p) { guardarDeshacer(null); aviso('Ya no hay nada que deshacer'); pintar(); return; }
+  const d = C.deshacerAsignacion(datos.movimientos, datos.transferencias, datos.cuentas, p.reg);
+  const antes = { movimientos: datos.movimientos, transferencias: datos.transferencias };
+  datos.movimientos = d.movimientos;
+  datos.transferencias = d.transferencias;
+  if (!guardar()) { Object.assign(datos, antes); return; }
+  guardarDeshacer(null);
+  pintar();
+  if ($('#dlg-sin-cuenta').open) verSinCuenta();
+  aviso(`Deshecho: ${textoCuantos(d.n, d.pasos)} vuelve${d.n + d.pasos === 1 ? '' : 'n'} a «Sin cuenta»`);
+}
+
+/** En el Resumen, mientras no se haga otra asignación: deshacer la última, o dejarla así. */
+function tarjetaDeshacer() {
+  const p = pendienteDeshacer();
+  if (!p) return '';
+  return `<div class="tarjeta"><h2>↩️ ¿Te equivocaste de cuenta?</h2>
+    <p class="explica">Pasaste ${esc(textoCuantos(p.n, p.pasos))} de «Sin cuenta» a «${esc(p.nombre)}». Si no era de ahí, deshazlo y vuelve${p.n + p.pasos === 1 ? '' : 'n'} a «Sin cuenta».</p>
+    <div class="acciones">
+      <button type="button" class="boton" data-accion="olvidar-deshacer">Está bien así</button>
+      <button type="button" class="boton principal" data-accion="deshacer-asignacion">Deshacer</button>
+    </div>
+  </div>`;
 }
 
 function confirmar({ titulo, texto, si = 'Sí', peligro = true, lista = [], soloAceptar = false }) {
@@ -180,6 +247,7 @@ function pintarResumen() {
   if (sinConvertir) {
     html += `<p class="subtitulo">${sinConvertir} movimiento${sinConvertir === 1 ? '' : 's'} en otra moneda no entra${sinConvertir === 1 ? '' : 'n'} en los totales porque falta su tipo de cambio.</p>`;
   }
+  html += tarjetaDeshacer();
   html += tarjetaEsperado(C.esperadoDelMes(datos.esperados, mes, datos.moneda, tasas, datos.esperadosMes), r.ingresos, tasas);
 
   if (!hayMovs && !filas.length) {
@@ -745,6 +813,14 @@ function pintarCuentas(seleccion) {
     <button type="button" class="chip" role="radio" aria-checked="${c.id === seleccion}" data-cuenta="${esc(c.id)}">
       <span aria-hidden="true">${esc(emojiCuenta(c))}</span>${esc(c.nombre)}
     </button>`).join('');
+  pistaCuenta();
+}
+
+/** Debajo de las cuentas del movimiento: cómo dejarlo sin cuenta, o que va sin cuenta (v0.29). */
+function pistaCuenta() {
+  $('#mov-cuenta-pista').textContent = cuentaSeleccionada()
+    ? 'Toca otra vez la cuenta para dejarlo sin cuenta.'
+    : 'Va sin cuenta. Toca una para ponérsela.';
 }
 
 function cuentaSeleccionada() {
@@ -859,8 +935,10 @@ function guardarMovimiento() {
     campos.importe = r2(importe - importe2);
     campos.importeBase = importeBase ? r2(importeBase - base2) : null;
   }
+  let antesSinCuenta = null; // si se le pone cuenta a uno que estaba «Sin cuenta», para poder deshacerlo (v0.29)
   if (editandoMov) {
     const m = datos.movimientos.find((x) => x.id === editandoMov);
+    if (m && cta && !datos.cuentas.some((c) => c.id === m.cuenta)) antesSinCuenta = [{ ...m }];
     if (m) Object.assign(m, campos);
   } else {
     datos.movimientos.push({ id: C.nuevoId(), creado: Date.now(), ...campos });
@@ -873,7 +951,9 @@ function guardarMovimiento() {
   $('#dlg-mov').close();
   mes = C.claveMes(fecha);
   año = C.inicioDelAño(mes, datos.inicioAño);
-  aviso(segunda ? 'Gasto dividido en dos' : editandoMov ? 'Cambios guardados' : `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} apuntado`);
+  const texto = segunda ? 'Gasto dividido en dos' : editandoMov ? 'Cambios guardados' : `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} apuntado`;
+  if (antesSinCuenta) apuntarAsignacion(antesSinCuenta, [], cta, `${texto}: ahora es de «${cuenta(cta).nombre}»`);
+  else aviso(texto);
   pintar();
 }
 
@@ -1614,6 +1694,9 @@ function verSinCuenta() {
   }).join('');
   $('#sin-cuenta-lista').innerHTML = lista.length ? `<ul class="lista">${html}</ul>` : '<p class="subtitulo">Ya no queda nada sin cuenta.</p>';
   $('#sin-cuenta-acciones').hidden = !lista.length;
+  const p = pendienteDeshacer();
+  $('#sin-cuenta-deshacer').hidden = !p;
+  if (p) $('#sin-cuenta-deshacer-texto').textContent = `La última vez pasaste ${textoCuantos(p.n, p.pasos)} a «${p.nombre}». Si te equivocaste, deshazlo y vuelve${p.n + p.pasos === 1 ? '' : 'n'} aquí.`;
   if (!$('#dlg-sin-cuenta').open) $('#dlg-sin-cuenta').showModal();
 }
 
@@ -1656,8 +1739,8 @@ async function asignarSinCuenta() {
   datos.movimientos = r.movimientos;
   datos.transferencias = r.transferencias;
   if (!guardar()) { Object.assign(datos, antes); return false; }
+  apuntarAsignacion(antes.movimientos, antes.transferencias, destino, `Listo: ${textoCuantos(r.n, r.pasos)} en «${nombre}»`);
   pintar();
-  aviso(`Listo: ${textoCuantos(r.n, r.pasos)} en «${nombre}»`);
   return true;
 }
 
@@ -2504,7 +2587,10 @@ document.addEventListener('click', (e) => {
   }
   const chipCuenta = e.target.closest('#mov-cuentas .chip');
   if (chipCuenta) {
-    for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(b === chipCuenta));
+    // Tocar otra vez la cuenta elegida la quita: el movimiento queda «Sin cuenta» (v0.29).
+    const quitar = chipCuenta.getAttribute('aria-checked') === 'true';
+    for (const b of document.querySelectorAll('#mov-cuentas .chip')) b.setAttribute('aria-checked', String(!quitar && b === chipCuenta));
+    pistaCuenta();
     return;
   }
 
@@ -2566,6 +2652,9 @@ document.addEventListener('click', (e) => {
     case 'borrar-cuenta': borrarCuenta(); break;
     case 'ver-sin-cuenta': verSinCuenta(); break;
     case 'sin-cuenta-todos': asignarTodosSinCuenta(); break;
+    case 'deshacer-asignacion': deshacerAsignacion(); break;
+    case 'olvidar-deshacer': guardarDeshacer(null); pintar(); if ($('#dlg-sin-cuenta').open) verSinCuenta(); break;
+    case 'aviso-boton': { const f = accionAviso; $('#toast').hidden = true; accionAviso = null; if (f) f(); break; }
     case 'editar-mov-sin-cuenta': $('#dlg-sin-cuenta').close(); listaSinCuentaAbierta = true; abrirMovimiento(el.dataset.id); break;
     case 'editar-trans-sin-cuenta': $('#dlg-sin-cuenta').close(); listaSinCuentaAbierta = true; abrirTransferencia(el.dataset.id); break;
     case 'a-cuenta-ok': if (alElegirCuenta) alElegirCuenta(); break;
