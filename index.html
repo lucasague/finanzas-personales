@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b1412" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Mis cuentas">
-  <meta name="version" content="a482025670">
+  <meta name="version" content="c91ef0d034">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -33,7 +33,36 @@
 
   <main id="contenido">
     <section id="vista-resumen" class="vista" aria-label="Resumen del mes"></section>
-    <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden></section>
+    <section id="vista-movimientos" class="vista" aria-label="Movimientos del mes" hidden>
+      <details id="buscador" class="tarjeta buscador">
+        <summary><span aria-hidden="true">🔎</span> Buscar un movimiento <span class="desplegar" aria-hidden="true">›</span></summary>
+        <form id="form-buscar" autocomplete="off" novalidate>
+          <p class="explica">Busca en todos los meses. Pon solo lo que recuerdes: se tienen en cuenta todas las casillas a la vez.</p>
+          <div class="fila-campos">
+            <label class="campo"><span>Cantidad</span><input id="bus-cantidad" inputmode="decimal" placeholder="Ej. 250"></label>
+            <label class="campo"><span>Hasta (si no la sabes justa)</span><input id="bus-cantidad-hasta" inputmode="decimal" placeholder="Ej. 300"></label>
+          </div>
+          <div class="fila-campos">
+            <label class="campo"><span>Desde el día</span><input id="bus-desde" type="date"></label>
+            <label class="campo"><span>Hasta el día</span><input id="bus-hasta" type="date"></label>
+          </div>
+          <label class="campo"><span>Cuenta</span><select id="bus-cuenta"></select></label>
+          <label class="campo"><span>Categoría</span><select id="bus-categoria"></select></label>
+          <label class="campo"><span>Qué es</span><select id="bus-tipo">
+            <option value="">Todo</option>
+            <option value="gasto">Gastos</option>
+            <option value="ingreso">Ingresos</option>
+            <option value="trans">Pasos entre cuentas</option>
+          </select></label>
+          <label class="campo"><span>Palabras de la nota</span><input id="bus-texto" maxlength="80" placeholder="Ej. farmacia"></label>
+          <div class="bus-pie">
+            <p id="bus-cuantos" class="bus-cuantos" aria-live="polite"></p>
+            <button type="button" class="boton" data-accion="bus-limpiar">Limpiar</button>
+          </div>
+        </form>
+      </details>
+      <div id="movs-lista"></div>
+    </section>
     <section id="vista-historial" class="vista" aria-label="Historial del año" hidden></section>
     <section id="vista-calendario" class="vista" aria-label="Calendario" hidden></section>
     <section id="vista-compra" class="vista" aria-label="Lista de compra" hidden>
@@ -45,7 +74,7 @@
       <div id="compra-guardados"></div>
     </section>
     <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden></section>
-    <p class="pie">Borrador v0.29 — tus datos se quedan en este móvil</p>
+    <p class="pie">Borrador v0.30 — tus datos se quedan en este móvil</p>
   </main>
 
   <button type="button" class="fab" data-accion="nuevo" aria-label="Apuntar un movimiento">+</button>

@@ -1798,6 +1798,71 @@ export function moverMovimientos(movimientos, ids, destino) {
   return { movimientos: movs, n };
 }
 
+// ---------- Buscar en Movimientos (v0.30) ----------
+
+/** En el filtro de cuenta, el valor que quiere decir «Sin cuenta» (sin cuenta o con una que ya no existe). */
+export const FILTRO_SIN_CUENTA = '__sin_cuenta__';
+
+/** Un filtro vacío: con él no se busca nada (se ve el mes como siempre). */
+export function filtroVacio() {
+  return { cantidad: null, cantidadHasta: null, cuenta: '', desde: '', hasta: '', categoria: '', tipo: '', texto: '' };
+}
+
+/** ¿Tiene el filtro algo puesto? */
+export function filtroActivo(f) {
+  if (!f) return false;
+  return f.cantidad != null || f.cantidadHasta != null || !!f.cuenta || !!f.desde || !!f.hasta
+    || !!f.categoria || !!f.tipo || !!String(f.texto || '').trim();
+}
+
+/**
+ * Busca entre TODOS los movimientos y pasos entre cuentas (de cualquier mes) los que cumplen a la vez todo lo
+ * puesto en el filtro `f` (lo vacío no filtra):
+ * - `cantidad` / `cantidadHasta` (céntimos, en la moneda del propio movimiento): solo `cantidad` es esa cantidad
+ *   exacta; las dos, un rango (da igual el orden); solo `cantidadHasta`, hasta esa. En un paso entre cuentas vale lo
+ *   que sale o lo que llega.
+ * - `cuenta`: id de una cuenta o FILTRO_SIN_CUENTA. Un paso entre cuentas entra si sale de ella o llega a ella.
+ * - `desde` / `hasta`: fechas ISO, incluidas.
+ * - `categoria`: id; entran también sus subcategorías. Los pasos entre cuentas no tienen categoría: no entran.
+ * - `tipo`: 'gasto', 'ingreso' o 'trans' (entre cuentas).
+ * - `texto`: palabras de la nota, como en textoDiceFrase (sin tildes ni mayúsculas, en cualquier orden).
+ * Devuelve la lista de más reciente a más antiguo, con los pasos marcados `esTrans: true`. No toca lo que recibe.
+ */
+export function buscarMovimientos(movimientos, transferencias, cuentas, categorias, f) {
+  if (!filtroActivo(f)) return [];
+  const ids = new Set((cuentas || []).map((c) => c.id));
+  let min = f.cantidad ?? null;
+  let max = f.cantidadHasta ?? null;
+  if (min != null && max == null) max = min;
+  if (min != null && max != null && min > max) [min, max] = [max, min];
+  const cuadra = (v) => (min == null || v >= min) && (max == null || v <= max);
+  const esDeCuenta = (id) => (f.cuenta === FILTRO_SIN_CUENTA ? !ids.has(id) : id === f.cuenta);
+  const enFechas = (fecha) => (!f.desde || (fecha || '') >= f.desde) && (!f.hasta || (fecha || '') <= f.hasta);
+  const texto = String(f.texto || '').trim();
+  const dice = (nota) => !texto || textoDiceFrase(nota || '', texto);
+  const cats = f.categoria ? descendientes(categorias || [], f.categoria) : null;
+  const res = [];
+  if (f.tipo !== 'trans') {
+    for (const m of movimientos || []) {
+      if (f.tipo && m.tipo !== f.tipo) continue;
+      if (!cuadra(m.importe)) continue;
+      if (f.cuenta && !esDeCuenta(m.cuenta)) continue;
+      if (!enFechas(m.fecha) || !dice(m.nota)) continue;
+      if (cats && !cats.has(m.categoria)) continue;
+      res.push(m);
+    }
+  }
+  if ((!f.tipo || f.tipo === 'trans') && !cats) {
+    for (const t of transferencias || []) {
+      if (!(cuadra(t.sale) || cuadra(t.llega))) continue;
+      if (f.cuenta && !esDeCuenta(t.desde) && !esDeCuenta(t.hacia)) continue;
+      if (!enFechas(t.fecha) || !dice(t.nota)) continue;
+      res.push({ ...t, esTrans: true });
+    }
+  }
+  return res.sort((x, y) => (y.fecha || '').localeCompare(x.fecha || '') || ((y.creado || 0) - (x.creado || 0)));
+}
+
 // ---------- Calendario de la familia (v0.17) ----------
 // Cada fecha guarda el día en que se apuntó (con su año). Las que se repiten cada año (cumpleaños) salen ese
 // día y mes todos los años a partir de ese; las demás, solo ese día.

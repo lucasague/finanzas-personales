@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'a482025670';
+const BUILD = 'c91ef0d034';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -384,17 +384,84 @@ function barrasCategorias(filas, padre = null) {
 const pistaDesglose = (filas) => (filas.some((f) => f.hijos.length)
   ? '<p class="explica">Toca una categoría con › para ver en qué se fue por dentro.</p>' : '');
 
+// ---------- Buscar en Movimientos (v0.30) ----------
+// El buscador vive fijo en index.html (no se repinta: así no se pierde lo que se está escribiendo). Mientras está
+// abierto y tiene algo puesto, la lista de abajo enseña lo encontrado en todos los meses en vez del mes.
+
+function filtroBuscador() {
+  const v = (id) => $(id).value.trim();
+  return {
+    cantidad: C.parseImporte(v('#bus-cantidad')),
+    cantidadHasta: C.parseImporte(v('#bus-cantidad-hasta')),
+    cuenta: $('#bus-cuenta').value,
+    desde: v('#bus-desde'),
+    hasta: v('#bus-hasta'),
+    categoria: $('#bus-categoria').value,
+    tipo: $('#bus-tipo').value,
+    texto: v('#bus-texto'),
+  };
+}
+
+/** Rellena las listas de cuentas y categorías del buscador con las de ahora, sin perder lo elegido si sigue. */
+function opcionesBuscador() {
+  const cuentaAntes = $('#bus-cuenta').value;
+  const catAntes = $('#bus-categoria').value;
+  const op = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
+  $('#bus-cuenta').innerHTML = op('', 'Todas')
+    + datos.cuentas.map((c) => op(c.id, c.nombre)).join('')
+    + op(C.FILTRO_SIN_CUENTA, 'Sin cuenta');
+  const grupo = (tipo, titulo) => {
+    const filas = C.ordenArbol(datos.categorias, tipo);
+    if (!filas.length) return '';
+    return `<optgroup label="${titulo}">${filas.map(({ categoria: c, nivel }) => op(c.id, `${'   '.repeat(nivel - 1)}${c.nombre}`)).join('')}</optgroup>`;
+  };
+  $('#bus-categoria').innerHTML = op('', 'Todas') + grupo('gasto', 'De gasto') + grupo('ingreso', 'De ingreso');
+  $('#bus-cuenta').value = cuentaAntes;
+  if ($('#bus-cuenta').value !== cuentaAntes) $('#bus-cuenta').value = '';
+  $('#bus-categoria').value = catAntes;
+  if ($('#bus-categoria').value !== catAntes) $('#bus-categoria').value = '';
+}
+
+function pintarBusqueda() {
+  const f = filtroBuscador();
+  const activo = $('#buscador').open && C.filtroActivo(f);
+  $('#bus-cuantos').textContent = activo ? '' : 'Rellena alguna casilla para buscar.';
+  if (!activo) return false;
+  const lista = C.buscarMovimientos(datos.movimientos, datos.transferencias, datos.cuentas, datos.categorias, f);
+  $('#bus-cuantos').textContent = lista.length
+    ? `${plural(lista.length, 'encontrado', 'encontrados')}${lista.length > 1 ? ', de más reciente a más antiguo' : ''}.`
+    : 'No hay ninguno con todo eso.';
+  $('#movs-lista').innerHTML = lista.length
+    ? `<h2 class="bus-titulo">Lo encontrado</h2>${htmlListaMovs(lista)}`
+    : `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">🔎</span>
+      No encuentro ningún movimiento con todo eso. Prueba a quitar alguna casilla o a poner un rango de cantidad.</div>`;
+  return true;
+}
+
+function limpiarBuscador() {
+  $('#form-buscar').reset();
+  pintarMovimientos();
+}
+
 function pintarMovimientos() {
+  opcionesBuscador();
+  if (pintarBusqueda()) return;
   // Gastos, ingresos y transferencias del mes juntos, por día (las transferencias llevan `esTrans`).
   const lista = [...C.movimientosDelMes(datos.movimientos, mes), ...C.transferenciasDelMes(datos.transferencias, mes).map((t) => ({ ...t, esTrans: true }))]
     .sort((x, y) => (y.fecha.localeCompare(x.fecha)) || ((y.creado || 0) - (x.creado || 0)));
   if (!lista.length) {
-    $('#vista-movimientos').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📭</span>
+    $('#movs-lista').innerHTML = `<div class="tarjeta vacio"><span class="grande" aria-hidden="true">📭</span>
       No hay movimientos en ${esc(C.nombreMes(mes).toLowerCase())}.</div>`;
     return;
   }
+  $('#movs-lista').innerHTML = '<button type="button" class="boton-linea" data-accion="sel-abrir-mes">Seleccionar varios…</button>'
+    + htmlListaMovs(lista);
+}
+
+/** La lista de Movimientos, agrupada por día: tocar uno lo abre para editarlo. */
+function htmlListaMovs(lista) {
   const tasas = C.tasasImplicitas(datos.movimientos);
-  let html = '<button type="button" class="boton-linea" data-accion="sel-abrir-mes">Seleccionar varios…</button>';
+  let html = '';
   let diaActual = '';
   for (const m of lista) {
     if (m.fecha !== diaActual) {
@@ -422,7 +489,7 @@ function pintarMovimientos() {
     </button></li>`;
   }
   html += `</ul>`;
-  $('#vista-movimientos').innerHTML = html;
+  return html;
 }
 
 /** Una transferencia en la lista: "A → B", con lo que sale y, si es otra moneda, lo que llega. */
@@ -2634,6 +2701,7 @@ document.addEventListener('click', (e) => {
     case 'mover-a-cat': { const id = editandoCat; $('#dlg-cat').close(); abrirMover(id); break; }
     case 'mover-ok': moverPorTexto(); break;
     case 'sel-abrir-mes': abrirSeleccion(); break;
+    case 'bus-limpiar': limpiarBuscador(); break;
     case 'sel-abrir-cat': { const id = listaDeCat; $('#dlg-movs-cat').close(); abrirSeleccion(id); break; }
     case 'sel-todos': {
       const todos = selMarcados.size !== selIds.length;
@@ -2733,6 +2801,10 @@ $('#dlg-sin-cuenta').addEventListener('close', () => {
 
 // "Mover por texto": la vista previa cambia según se escribe, se elige la categoría o se quita una marca.
 $('#mover-texto').addEventListener('input', pintarMover);
+// Buscador de Movimientos (v0.30): cada cambio vuelve a buscar; al plegarlo se ve otra vez el mes.
+$('#form-buscar').addEventListener('input', () => { if (!pintarBusqueda()) pintarMovimientos(); });
+$('#form-buscar').addEventListener('submit', (e) => { e.preventDefault(); document.activeElement?.blur(); });
+$('#buscador').addEventListener('toggle', pintarMovimientos);
 $('#mover-destino').addEventListener('change', pintarMover);
 $('#mover-resultado').addEventListener('change', (e) => {
   const id = e.target.dataset && e.target.dataset.id;

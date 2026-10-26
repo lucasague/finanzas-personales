@@ -480,3 +480,17 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .abono-fila .importe { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .abono-fila .quitar { flex: 0 0 40px; min-height: 44px; background: none; border: 0; color: var(--gasto); font-size: 1.1rem; }
 #deuda-ficha[hidden], #abono-gasto[hidden], #cuenta-deuda-bloque[hidden] { display: none; }
+
+/* Buscar en Movimientos (v0.30) */
+.buscador { padding-top: 4px; padding-bottom: 4px; }
+.buscador > summary {
+  list-style: none; cursor: pointer; min-height: 48px; display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+}
+.buscador > summary::-webkit-details-marker { display: none; }
+.buscador > summary .desplegar { margin-left: auto; }
+.buscador[open] > summary { margin-bottom: 6px; }
+.buscador form { padding-bottom: 8px; }
+.bus-pie { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.bus-cuantos { margin: 0; font-weight: 600; }
+.bus-titulo { font-size: 1rem; margin: 14px 4px 0; }
