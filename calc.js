@@ -346,6 +346,70 @@ export function saldoDePartidaPara(id, saldoHoy, movimientos, cuentas, base = 'M
   return { saldoInicial: saldoHoy - fila.saldo, sinConvertir: fila.sinConvertir };
 }
 
+// ---------- Fichas de cuenta del Resumen (v0.31) ----------
+// Se tocan una o varias cuentas: debajo salen sus movimientos y, con varias, la suma de sus saldos en dólares.
+
+/**
+ * Tipos de cambio de todo lo apuntado: los de los movimientos (lo que costó en la principal) y los de los pasos
+ * entre cuentas de dos monedas (lo que salió frente a lo que llegó). Mismo formato que tasasImplicitas.
+ */
+export function tasasDeTodo(movimientos, transferencias = []) {
+  const comoMovs = (transferencias || [])
+    .filter((t) => t.monedaSale && t.monedaLlega && t.monedaSale !== t.monedaLlega && t.sale > 0 && t.llega > 0)
+    .map((t) => ({ moneda: t.monedaSale, importe: t.sale, monedaBase: t.monedaLlega, importeBase: t.llega, fecha: t.fecha }));
+  return tasasImplicitas([...(movimientos || []), ...comoMovs]);
+}
+
+/**
+ * Cuántas unidades de `a` vale una de `de` ese mes: el cambio directo (o al revés) y, si no lo hay, pasando por
+ * otra moneda de la que sí se sabe (colones → pesos → dólares). null si no se sabe de ningún modo.
+ */
+export function tasaConPuente(tasas, de, a, mes) {
+  const t = tasa(tasas, de, a, mes);
+  if (t != null) return t;
+  const monedas = new Set();
+  for (const k of tasas.keys()) for (const x of k.split('>')) monedas.add(x);
+  for (const p of monedas) {
+    if (p === de || p === a) continue;
+    const t1 = tasa(tasas, de, p, mes);
+    const t2 = tasa(tasas, p, a, mes);
+    if (t1 != null && t2 != null) return t1 * t2;
+  }
+  return null;
+}
+
+/** Un saldo (céntimos de `moneda`) en dólares, en céntimos, con el cambio del mes `mes`. null si falta el cambio. */
+export function saldoEnDolares(saldo, moneda, tasas, mes) {
+  const t = tasaConPuente(tasas, moneda, 'USD', mes);
+  return t == null ? null : Math.round(saldo * t);
+}
+
+/**
+ * Suma en dólares de unas filas de saldosPorCuenta. Devuelve { total, fuera }: `total` en céntimos de dólar con
+ * las que se han podido pasar; `fuera`, las filas que no, porque falta el tipo de cambio de su moneda.
+ */
+export function sumaEnDolares(filas, tasas, mes) {
+  let total = 0;
+  const fuera = [];
+  for (const f of filas || []) {
+    const v = saldoEnDolares(f.saldo, f.moneda, tasas, mes);
+    if (v == null) fuera.push(f);
+    else total += v;
+  }
+  return { total, fuera };
+}
+
+/**
+ * Los movimientos de unas cuentas (`ids`) y los pasos entre cuentas que salen de alguna o llegan a alguna (marcados
+ * `esTrans: true`; uno entre dos de ellas sale una sola vez), de más reciente a más antiguo. No toca lo que recibe.
+ */
+export function movimientosDeCuentas(movimientos, transferencias, ids) {
+  const set = new Set(ids || []);
+  const res = (movimientos || []).filter((m) => set.has(m.cuenta));
+  for (const t of transferencias || []) if (set.has(t.desde) || set.has(t.hacia)) res.push({ ...t, esTrans: true });
+  return res.sort((x, y) => (y.fecha || '').localeCompare(x.fecha || '') || ((y.creado || 0) - (x.creado || 0)));
+}
+
 /**
  * Lo que está "Sin cuenta" (v0.26): movimientos sin cuenta o con una cuenta que ya no existe, y pasos entre cuentas
  * con algún lado así. Devuelve { movimientos, pasos } (cuántos).

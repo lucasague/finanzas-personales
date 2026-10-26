@@ -1,6 +1,6 @@
 import * as C from './calc.js';
 
-const BUILD = 'c91ef0d034';
+const BUILD = '67716dd63f';
 const CLAVE_DATOS = 'finanzas.datos.v1';
 const $ = (sel) => document.querySelector(sel);
 
@@ -27,6 +27,8 @@ let editandoEvento = null; // id de la fecha del calendario en edición, o null 
 let anualTocado = false; // si la persona ha cambiado a mano "Se repite cada año"
 let ultimoTipoEvento = 'evento';
 let editandoGuardados = false; // en la Compra, si se están quitando artículos guardados
+let cuentasSel = []; // en el Resumen, las cuentas tocadas en «Saldo de cada cuenta» (v0.31)
+let cuentasVerHasta = 30; // cuántos movimientos de esas cuentas se ven antes de «Ver más»
 const VISTAS = ['resumen', 'movimientos', 'historial', 'calendario', 'compra', 'ajustes'];
 
 // ---------- Almacenamiento (solo en este dispositivo) ----------
@@ -264,20 +266,30 @@ function pintarResumen() {
     const totales = new Map();
     for (const f of saldos) totales.set(f.moneda, (totales.get(f.moneda) || 0) + f.saldo);
     const cifra = (c, mon) => `${c < 0 ? '−' : ''}${C.formatoMoneda(Math.abs(c), mon)}`;
+    const deCuentas = saldos.filter((f) => f.cuenta.id !== null);
+    const sinCuenta = saldos.find((f) => f.cuenta.id === null);
+    // La selección sigue entre repintados; se olvidan las cuentas que ya no existen.
+    cuentasSel = cuentasSel.filter((id) => deCuentas.some((f) => f.cuenta.id === id));
     html += `<div class="tarjeta"><h2>Saldo de cada cuenta</h2>
-      <p class="explica">Lo que hay hoy en cada una: su saldo de partida más todo lo apuntado y lo pasado entre cuentas. Si no cuadra con lo que tienes de verdad, ve a Ajustes, toca la cuenta y usa «Poner el saldo de hoy».</p>`;
-    for (const f of saldos) {
-      if (f.cuenta.id === null) { html += filaSinCuenta(cifra(f.saldo, f.moneda), f.saldo < 0); continue; }
+      <p class="explica">Lo que hay hoy en cada una. Toca una para ver sus movimientos debajo; toca varias para sumarlas en dólares. Si alguna no cuadra con lo que tienes de verdad, ve a Ajustes, toca la cuenta y usa «Poner el saldo de hoy».</p>
+      <div class="fichas">`;
+    for (const f of deCuentas) {
+      const sel = cuentasSel.includes(f.cuenta.id);
+      // Una cifra larga se encoge un poco; si aun así no cabe, solo se parte tras el código de moneda («USD», «CRC»).
+      const txt = cifra(f.saldo, f.moneda).replace(/^(−?[A-Z]{3}) /, '$1 ');
       html += `
-        <div class="cat-fila">
-          <div class="cat-linea">
-            <span class="cat-nombre">${esc(emojiCuenta(f.cuenta))} ${esc(f.cuenta.nombre)}</span>
-            <span class="cuenta-neto ${f.saldo < 0 ? 'gasto' : 'ingreso'}">${esc(cifra(f.saldo, f.moneda))}</span>
-          </div>
-          ${f.sinConvertir ? `<p class="subtitulo">${esc(plural(f.sinConvertir, 'movimiento', 'movimientos'))} en otra moneda sin tipo de cambio: no cuenta aún.</p>` : ''}
-        </div>`;
+        <button type="button" class="ficha" data-accion="ficha-cuenta" data-id="${esc(f.cuenta.id)}" aria-pressed="${sel}">
+          <span class="ficha-nombre"><span aria-hidden="true">${esc(emojiCuenta(f.cuenta))}</span> ${esc(f.cuenta.nombre)}</span>
+          <span class="ficha-saldo ${f.saldo < 0 ? 'neg' : ''} ${txt.length > 11 ? 'largo' : ''}">${esc(txt)}</span>
+        </button>`;
     }
+    html += `</div>`;
+    for (const f of deCuentas) {
+      if (f.sinConvertir) html += `<p class="subtitulo">${esc(f.cuenta.nombre)}: ${esc(plural(f.sinConvertir, 'movimiento', 'movimientos'))} en otra moneda sin tipo de cambio: no cuenta aún.</p>`;
+    }
+    if (sinCuenta) html += filaSinCuenta(cifra(sinCuenta.saldo, sinCuenta.moneda), sinCuenta.saldo < 0);
     if (saldos.length > 1) html += `<p class="subtitulo">Total: <strong>${esc([...totales].map(([mon, t]) => cifra(t, mon)).join(' + '))}</strong></p>`;
+    if (cuentasSel.length) html += detalleCuentasSel(deCuentas.filter((f) => cuentasSel.includes(f.cuenta.id)), cifra);
     html += `</div>`;
   }
   html += tarjetaDeudas();
@@ -311,6 +323,60 @@ function filaSinCuenta(importe, negativo) {
       <span class="importe ${negativo ? 'gasto' : 'ingreso'}">${esc(importe)}</span>
       <span class="flecha" aria-hidden="true">›</span>
     </button>`;
+}
+
+/**
+ * Debajo de las fichas (v0.31): con varias cuentas tocadas, la suma de sus saldos en dólares; con una en otra
+ * moneda, lo que vale en dólares. Luego los movimientos de esas cuentas, más recientes primero.
+ */
+function detalleCuentasSel(filas, cifra) {
+  const tasas = C.tasasDeTodo(datos.movimientos, datos.transferencias);
+  const hoy = C.claveMes(C.hoyISO());
+  const usd = (c) => cifra(c, 'USD');
+  let html = '<div class="fichas-detalle">';
+  if (filas.length > 1) {
+    const s = C.sumaEnDolares(filas, tasas, hoy);
+    const fuera = s.fuera.map((f) => f.cuenta.nombre);
+    html += `<p class="fichas-suma">Suma de las seleccionadas: <strong class="${s.total < 0 ? 'gasto' : ''}">${esc(usd(s.total))}</strong></p>`;
+    if (fuera.length) {
+      const monedas = [...new Set(s.fuera.map((f) => C.MONEDAS[f.moneda]?.nombre.toLowerCase() || f.moneda))];
+      html += `<p class="subtitulo aviso-fuera">${esc(listaY(fuera))} no ${fuera.length === 1 ? 'entra' : 'entran'} en la suma: aún no sé el tipo de cambio de ${esc(listaY(monedas))} a dólar. Se sabrá en cuanto apuntes algo en esa moneda con lo que costó, o pases dinero de una cuenta en esa moneda a otra.</p>`;
+    }
+  } else {
+    const f = filas[0];
+    if (f.moneda !== 'USD') {
+      const v = C.saldoEnDolares(f.saldo, f.moneda, tasas, hoy);
+      html += v == null
+        ? `<p class="subtitulo">Aún no sé cuánto vale en dólares: falta el tipo de cambio de ${esc(C.MONEDAS[f.moneda]?.nombre.toLowerCase() || f.moneda)} a dólar.</p>`
+        : `<p class="fichas-suma">En dólares: <strong class="${v < 0 ? 'gasto' : ''}">≈ ${esc(usd(v))}</strong></p>`;
+    }
+  }
+  const lista = C.movimientosDeCuentas(datos.movimientos, datos.transferencias, filas.map((f) => f.cuenta.id));
+  const titulo = filas.length === 1 ? `Movimientos de ${filas[0].cuenta.nombre}` : `Movimientos de las ${filas.length} seleccionadas`;
+  html += `<h3 class="fichas-titulo">${esc(titulo)}</h3>`;
+  if (!lista.length) html += '<p class="subtitulo">Todavía no hay nada apuntado aquí.</p>';
+  else {
+    html += htmlListaMovs(lista.slice(0, cuentasVerHasta));
+    if (lista.length > cuentasVerHasta) {
+      html += `<button type="button" class="boton-linea" data-accion="fichas-ver-mas">Ver más (${esc(plural(lista.length - cuentasVerHasta, 'queda', 'quedan'))})</button>`;
+    }
+  }
+  html += '<button type="button" class="boton-linea" data-accion="fichas-limpiar">Quitar la selección</button></div>';
+  return html;
+}
+
+/** "a", "a y b", "a, b y c". */
+function listaY(xs) {
+  return xs.length < 2 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`;
+}
+
+/** Tocar una ficha la añade a la selección o, si ya estaba, la quita. */
+function tocarFicha(id) {
+  const y = window.scrollY;
+  cuentasSel = cuentasSel.includes(id) ? cuentasSel.filter((x) => x !== id) : [...cuentasSel, id];
+  cuentasVerHasta = 30;
+  pintarResumen();
+  window.scrollTo(0, y);
 }
 
 /** Esperado frente a real del mes, en el Resumen. Nada si no hay ingreso esperado ese mes. */
@@ -2719,6 +2785,9 @@ document.addEventListener('click', (e) => {
     case 'nueva-cuenta': abrirCuenta(); break;
     case 'borrar-cuenta': borrarCuenta(); break;
     case 'ver-sin-cuenta': verSinCuenta(); break;
+    case 'ficha-cuenta': tocarFicha(el.dataset.id); break;
+    case 'fichas-ver-mas': { const y = window.scrollY; cuentasVerHasta += 30; pintarResumen(); window.scrollTo(0, y); break; }
+    case 'fichas-limpiar': { const y = window.scrollY; cuentasSel = []; pintarResumen(); window.scrollTo(0, y); break; }
     case 'sin-cuenta-todos': asignarTodosSinCuenta(); break;
     case 'deshacer-asignacion': deshacerAsignacion(); break;
     case 'olvidar-deshacer': guardarDeshacer(null); pintar(); if ($('#dlg-sin-cuenta').open) verSinCuenta(); break;

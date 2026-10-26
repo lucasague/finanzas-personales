@@ -494,3 +494,24 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .bus-pie { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
 .bus-cuantos { margin: 0; font-weight: 600; }
 .bus-titulo { font-size: 1rem; margin: 14px 4px 0; }
+
+/* Saldo de cada cuenta en fichas (v0.31): se tocan una o varias y debajo salen sus movimientos */
+.fichas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.ficha {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; min-height: 60px;
+  background: var(--superficie-2); color: var(--texto); border: 2px solid transparent; border-radius: 12px;
+  padding: 8px; text-align: left; cursor: pointer;
+}
+.ficha:active { transform: scale(.98); }
+.ficha[aria-pressed="true"] { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); }
+.ficha-nombre { width: 100%; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .9; }
+.ficha-saldo { width: 100%; font-size: .9rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; overflow-wrap: anywhere; }
+.ficha-saldo.largo { font-size: .78rem; letter-spacing: -.01em; }
+.ficha-saldo.neg { color: var(--gasto); }
+.ficha[aria-pressed="true"] .ficha-saldo.neg { color: inherit; }
+.fichas-detalle { border-top: 1px solid var(--borde); margin-top: 12px; padding-top: 10px; }
+.fichas-suma { margin: 0 0 6px; font-size: .95rem; }
+.fichas-suma strong { font-variant-numeric: tabular-nums; }
+.fichas-titulo { font-size: .95rem; margin: 10px 0 0; }
+.fichas-detalle .mov { background: var(--superficie-2); box-shadow: none; }
+@media (min-width: 560px) { .fichas { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
